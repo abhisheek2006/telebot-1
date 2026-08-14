@@ -588,7 +588,7 @@ def _handle_text_input(message: types.Message):
 
 def _do_lookup(message: types.Message, phone_number: str):
     uid = message.from_user.id
-    app.send_chat_action(message.chat.id, "typing")
+    app.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
     try:
         params = {"number": phone_number}
         logging.info("User %s querying API for %s", uid, phone_number)
