@@ -71,7 +71,7 @@ def get_or_create_user(user_id: int, first_name: str = "User", username: str = N
             "user_id_str": uid_str,
             "first_name": first_name,
             "username": username or "",
-            "is_approved": False,
+            "is_approved": bool(ADMIN_ID and uid_str == str(ADMIN_ID)),
             "credits": DEFAULT_NEW_USER_CREDITS,
             "total_lookups": 0,
             "created_at": datetime.now(timezone.utc),
@@ -89,8 +89,14 @@ def get_or_create_user(user_id: int, first_name: str = "User", username: str = N
 
 
 def is_approved(user_id: int) -> bool:
-    doc = users_col.find_one({"user_id_str": str(user_id)})
-    return bool(doc and doc.get("is_approved"))
+    uid_str = str(user_id)
+    doc = users_col.find_one({"user_id_str": uid_str})
+    if doc and doc.get("is_approved"):
+        return True
+    if ADMIN_ID and uid_str == str(ADMIN_ID):
+        approve_user(user_id)
+        return True
+    return False
 
 
 def approve_user(user_id: int):
@@ -317,7 +323,7 @@ def _cmd_start(message: types.Message):
     first_name = message.from_user.first_name or "User"
     doc = get_or_create_user(uid, first_name, message.from_user.username)
 
-    if doc.get("is_approved"):
+    if is_approved(uid):
         credits = doc.get("credits", 0)
         text = (
             f"👋 Welcome back, {first_name}!\n\n"
@@ -580,6 +586,24 @@ def _handle_text_input(message: types.Message):
             )
             return
 
+        deduct_credit(uid)
+        bump_stat("lookups")
+        _do_lookup(message, raw)
+        return
+
+    raw = message.text.strip()
+    if raw.replace("+", "").isdigit() and len(raw) >= 5:
+        if not is_approved(uid):
+            message.reply_text("⛔ Not authorized. Contact admin.", reply_markup=buy_credit_kb())
+            return
+        doc = get_user(uid)
+        if doc.get("credits", 0) < CREDIT_PER_LOOKUP:
+            message.reply_text(
+                f"⚠️ Not enough credits (need {CREDIT_PER_LOOKUP}, have {doc.get('credits', 0)}).",
+                reply_markup=buy_credit_kb(),
+            )
+            return
+        pending_input[uid] = None
         deduct_credit(uid)
         bump_stat("lookups")
         _do_lookup(message, raw)
