@@ -307,7 +307,7 @@ def format_api_response(data, phone_number):
                     f"👤 Name: {record.get('name', 'N/A')}\n"
                     f"👨‍👦 Father: {record.get('fname', 'N/A')}\n"
                     f"🏠 Address: {record.get('address', 'N/A')}\n"
-                    f"🆔 ID: {record.get('aadhar', 'N/A')}\n"
+                    f"🆔 Adhaar: {record.get('aadhar', 'N/A')}\n"
                     f"📍 Circle: {record.get('circle', 'N/A')}\n"
                     f"📞 Alternate: {record.get('alt', 'N/A')}\n"
                     f"📧 Email: {record.get('email') or 'N/A'}\n"
