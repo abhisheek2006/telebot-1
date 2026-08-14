@@ -29,6 +29,9 @@ if not BOT_TOKEN:
 if not ADMIN_ID:
     logging.warning("ADMIN_ID environment variable is not set!")
 
+API_ID = os.environ.get("API_ID")
+API_HASH = os.environ.get("API_HASH")
+
 logging.info("Connecting to MongoDB...")
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client.telegram_bot
@@ -41,7 +44,22 @@ DEFAULT_NEW_USER_CREDITS = int(os.environ.get("DEFAULT_NEW_USER_CREDITS", "5"))
 
 pending_input = {}
 
-app = Client("creditbot", bot_token=BOT_TOKEN)
+_client_kwargs = {"bot_token": BOT_TOKEN}
+if API_ID and API_HASH:
+    _client_kwargs["api_id"] = int(API_ID)
+    _client_kwargs["api_hash"] = API_HASH
+    logging.info("Using API_ID/API_HASH from environment for MTProto auth.")
+else:
+    # Fallback: PyroTGFork always needs api_id/api_hash for session creation.
+    # Get your own pair from https://my.telegram.org for production.
+    _client_kwargs["api_id"] = 18802415
+    _client_kwargs["api_hash"] = "a8993f96404fd9a67de867586b3ddc92"
+    logging.warning(
+        "API_ID/API_HASH not set — using fallback demo credentials. "
+        "Set your own pair from https://my.telegram.org in production!"
+    )
+
+app = Client("creditbot", **_client_kwargs)
 
 
 # ─────────────────────────── MongoDB helpers ────────────────────────────
