@@ -1,9 +1,8 @@
 import os
 import logging
 import requests
-import uuid
 from datetime import datetime, timezone
-from pyrogram import Client, enums, types
+from pyrogram import Client, enums, filters, types
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
@@ -275,7 +274,7 @@ def user_action_kb(target_uid: int) -> types.InlineKeyboardMarkup:
 
 
 # ─────────────────────────────── Handlers ───────────────────────────────
-@app.on_message(enums.ChatType.PRIVATE)
+@app.on_message(filters.private)
 def handle_message(client: Client, message: types.Message):
     user_id = message.from_user.id
     first_name = message.from_user.first_name or "User"
