@@ -291,8 +291,37 @@ def format_api_response(data, phone_number):
 
         replace_tag_credit(data)
 
-        formatted_json = json.dumps(data, indent=2, ensure_ascii=False)
-        return f"🔍 Number Lookup Result\n{formatted_json}"
+        result_data = data.get('result', {})
+        inner_result = result_data.get('result', {})
+        records = inner_result.get('result', []) if isinstance(inner_result.get('result'), list) else [inner_result.get('result', {})]
+
+        if not records:
+            records = [{}]
+
+        response_text = "🔍 Number Lookup Result\n\n"
+
+        for record in records:
+            if record:
+                response_text += (
+                    f"📱 Mobile: {record.get('num', 'N/A')}\n"
+                    f"👤 Name: {record.get('name', 'N/A')}\n"
+                    f"👨‍👦 Father: {record.get('fname', 'N/A')}\n"
+                    f"🏠 Address: {record.get('address', 'N/A')}\n"
+                    f"🆔 ID: {record.get('aadhar', 'N/A')}\n"
+                    f"📍 Circle: {record.get('circle', 'N/A')}\n"
+                    f"📞 Alternate: {record.get('alt', 'N/A')}\n"
+                    f"📧 Email: {record.get('email') or 'N/A'}\n"
+                )
+            response_text += "\n"
+
+        tag = inner_result.get('tag', '@ABHISHEEK163')
+        credit = result_data.get('credit', '@ABHISHEEK163')
+        timestamp = result_data.get('meta', {}).get('timestamp', 'N/A')
+        response_text += f"🏷️ Tag: {tag}\n"
+        response_text += f"👤 Credit: {credit}\n"
+        response_text += f"🕐 Timestamp: {timestamp}"
+
+        return response_text
 
     except Exception as e:
         logging.error(f"Error formatting response: {str(e)}")
