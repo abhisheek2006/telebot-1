@@ -17,17 +17,22 @@ A Telegram bot built with **Pyrogram (PyroTGFork)** and **MongoDB** that provide
 ## Setup
 
 1. Get a bot token from [@BotFather](https://t.me/BotFather)
-2. Ensure you have a MongoDB Atlas cluster (connection URI below uses the sandbox)
-3. Add environment variables to `.env`:
+2. Get your **API_ID** and **API_HASH** from [my.telegram.org](https://my.telegram.org) → API Development Tools
+3. Ensure you have a MongoDB Atlas cluster (connection URI below uses the sandbox)
+4. Add environment variables to `.env`:
    - `BOT_TOKEN=your_bot_token`
    - `ADMIN_ID=your_telegram_user_id`
+   - `API_ID=12345` (from my.telegram.org)
+   - `API_HASH=your_api_hash` (from my.telegram.org)
    - `MONGO_URI=mongodb+srv://user:pass@cluster/...&retryWrites=true&w=majority`
-4. `pip install -r requirements.txt`
-5. `python bot.py`
+5. `pip install -r requirements.txt`
+6. `python bot.py`
 
 ## Deploy
 
-Push to GitHub and connect to Railway for automatic deployment. The `Procfile` runs:
+Push to GitHub and connect to Railway for automatic deployment. Set all env
+vars (`BOT_TOKEN`, `ADMIN_ID`, `API_ID`, `API_HASH`, `MONGO_URI`) in your
+Railway dashboard. The `Procfile` runs:
 ```
 worker: python3 bot.py
 ```
@@ -35,4 +40,16 @@ worker: python3 bot.py
 ## Usage
 
 Send `/start` to begin. Approved users get an inline keyboard with **Lookup**, **Balance**, and **Help** buttons.
-Admins also see **Add Credit**, **List Users**, and **Stats** buttons.
+Admins also see **Add Credit** (DANGER), **List Users** (PRIMARY), and **Stats** (DEFAULT) buttons.
+
+### Admin Add Credit (to any user)
+
+Two ways to add credits:
+
+1. **`/credit`** — admin enters user_id, then amount
+2. **List Users → click user → 💳 Add Credit (DANGER)** — skips user_id step, goes straight to amount
+
+### Credit System
+- New users get **5 welcome credits** (configurable via `DEFAULT_NEW_USER_CREDITS`)
+- Each lookup costs **1 credit** (configurable via `CREDIT_PER_LOOKUP`)
+- Insufficient credits show a **💰 Buy Credit** (DANGER) button
