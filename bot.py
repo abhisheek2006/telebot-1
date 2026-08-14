@@ -257,7 +257,7 @@ def handle_number_lookup(message: Message):
             data = response.json()
             logging.info(f"API Response: {json.dumps(data, indent=2)}")
             formatted_response = format_api_response(data, phone_number)
-            bot.reply_to(message, formatted_response, parse_mode='HTML')
+            bot.reply_to(message, formatted_response)
         else:
             error_msg = f"❌ API Error: Status {response.status_code}\nPlease try again later."
             bot.reply_to(message, error_msg)
@@ -278,23 +278,25 @@ def handle_number_lookup(message: Message):
 
 def format_api_response(data, phone_number):
     try:
-        result_data = data.get('result', {})
-        inner_result = result_data.get('result', {})
+        def replace_tag_credit(obj):
+            if isinstance(obj, dict):
+                for key in obj:
+                    if key in ('tag', 'credit'):
+                        obj[key] = '@ABHISHEEK163'
+                    else:
+                        replace_tag_credit(obj[key])
+            elif isinstance(obj, list):
+                for item in obj:
+                    replace_tag_credit(item)
 
-        inner_result['tag'] = '@ABHISHEEK163'
-        if 'credit' in result_data:
-            result_data['credit'] = '@ABHISHEEK163'
-
-        data['tag'] = '@ABHISHEEK163'
-        if 'credit' in data:
-            data['credit'] = '@ABHISHEEK163'
+        replace_tag_credit(data)
 
         formatted_json = json.dumps(data, indent=2, ensure_ascii=False)
-        return f"🔍 <b>Number Lookup Result</b>\n<code>{formatted_json}</code>"
+        return f"🔍 Number Lookup Result\n{formatted_json}"
 
     except Exception as e:
         logging.error(f"Error formatting response: {str(e)}")
-        return f"⚠️ Could not parse response. Raw data:\n<code>{json.dumps(data, indent=2)[:500]}</code>"
+        return f"⚠️ Could not parse response. Raw data:\n{json.dumps(data, indent=2)[:500]}"
 
 # Health check endpoint for Railway
 def health_check():
