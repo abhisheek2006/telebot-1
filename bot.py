@@ -59,7 +59,7 @@ else:
         "Set your own pair from https://my.telegram.org in production!"
     )
 
-app = Client("creditbot", **_client_kwargs)
+app = Client("creditbot", parse_mode=enums.ParseMode.HTML, **_client_kwargs)
 
 
 # ─────────────────────────── MongoDB helpers ────────────────────────────
@@ -351,7 +351,7 @@ def _cmd_start(message: types.Message):
                     int(ADMIN_ID),
                     notification,
                     reply_markup=approval_kb(uid),
-                    parse_mode="html",
+
                 )
             except Exception as e:
                 logging.error("Could not notify admin: %s", e)
@@ -375,15 +375,13 @@ def _cmd_help(message: types.Message):
         "/revoke &lt;id&gt; — revoke user\n\n"
         "❓ Contact @Ankit_jii25 for issues."
     )
-    message.reply_text(help_text, reply_markup=main_menu_kb(), parse_mode="html")
-
-
+    message.reply_text(help_text, reply_markup=main_menu_kb())
 def _cmd_admin(message: types.Message):
     if str(message.from_user.id) != str(ADMIN_ID):
         message.reply_text("⛔ Admin only.")
         return
     text = "👑 <b>Admin Panel</b>\n\nUse buttons below:"
-    message.reply_text(text, reply_markup=admin_kb(), parse_mode="html")
+    message.reply_text(text, reply_markup=admin_kb())
 
 
 def _cmd_balance(message: types.Message):
@@ -401,7 +399,7 @@ def _cmd_balance(message: types.Message):
         "💳 Need more? Contact the admin."
     )
     kb = admin_kb() if str(message.from_user.id) == str(ADMIN_ID) else main_menu_kb()
-    message.reply_text(text, reply_markup=kb, parse_mode="html")
+    message.reply_text(text, reply_markup=kb)
 
 
 def _cmd_add_credit(message: types.Message):
@@ -412,7 +410,6 @@ def _cmd_add_credit(message: types.Message):
     message.reply_text(
         "🏦 <b>Add Credit</b>\n\n"
         "Send the <b>user_id</b> to add credits to:",
-        parse_mode="html",
     )
 
 
@@ -479,7 +476,7 @@ def _cmd_admin_list(message: types.Message):
         status = "✅" if u.get("is_approved") else "❌"
         cr = u.get("credits", 0)
         text += f"{status} <code>{uid}</code> — {name} ({cr} credits)\n"
-    message.reply_text(text, reply_markup=user_list_kb(users), parse_mode="html")
+    message.reply_text(text, reply_markup=user_list_kb(users))
 
 
 def _cmd_admin_stats(message: types.Message):
@@ -501,7 +498,7 @@ def _cmd_admin_stats(message: types.Message):
         f"👑 Admin ID: <code>{ADMIN_ID}</code>\n"
         f"🔗 API: <code>{API_URL}</code>\n"
     )
-    message.reply_text(text, reply_markup=admin_kb(), parse_mode="html")
+    message.reply_text(text, reply_markup=admin_kb())
 
 
 def _ask_lookup(message: types.Message):
@@ -524,7 +521,6 @@ def _ask_lookup(message: types.Message):
     message.reply_text(
         "🔍 <b>Enter phone number</b>\n\n"
         "Include country code:\n📱 Example: 947426561",
-        parse_mode="html",
     )
 
 
@@ -538,7 +534,6 @@ def _handle_text_input(message: types.Message):
             pending_input[uid] = ("awaiting_credit_amount", int(raw))
             message.reply_text(
                 f"🏦 Now send the <b>amount</b> of credits to add for user {raw}:",
-                parse_mode="html",
             )
         else:
             message.reply_text("❌ Please send a valid numeric user_id.")
@@ -677,7 +672,7 @@ def handle_callback(client: Client, query: types.CallbackQuery):
     get_or_create_user(uid, first_name, query.from_user.username)
 
     def cb_answer(text: str, alert: bool = False):
-        app.answer_callback_query(query.id, text, alert=alert)
+        app.answer_callback_query(query.id, text, show_alert=alert)
 
     if data == "lookup":
         if not is_approved(uid):
@@ -698,7 +693,6 @@ def handle_callback(client: Client, query: types.CallbackQuery):
         pending_input[uid] = "awaiting_lookup_number"
         query.message.edit_text(
             "🔍 <b>Send phone number</b>\nExample: <code>947426561</code>",
-            parse_mode="html",
         )
         cb_answer("Enter number")
 
@@ -713,7 +707,6 @@ def handle_callback(client: Client, query: types.CallbackQuery):
         query.message.edit_text(
             f"💰 <b>Balance</b>\n\nCredits: <code>{credits}</code>\n"
             f"Lookups: <code>{lookups}</code>",
-            parse_mode="html",
             reply_markup=kb,
         )
         cb_answer("Balance updated")
@@ -724,7 +717,6 @@ def handle_callback(client: Client, query: types.CallbackQuery):
             "Send a phone number to look it up.\n"
             f"Cost: {CREDIT_PER_LOOKUP} credit per lookup.\n"
             "Use buttons below:",
-            parse_mode="html",
             reply_markup=main_menu_kb(),
         )
         cb_answer("Help")
@@ -734,27 +726,9 @@ def handle_callback(client: Client, query: types.CallbackQuery):
             "💰 <b>Buy Credit</b>\n\n"
             "Contact the admin (@Ankit_jii25) to get more credits.\n"
             "You'll be notified once credits are added.",
-            parse_mode="html",
             reply_markup=main_menu_kb(),
         )
         cb_answer("Contact admin")
-
-    elif data == "admin_add_credit":
-        if str(uid) != str(ADMIN_ID):
-            cb_answer("⛔ Admin only", alert=True)
-            return
-        parts = data.split("|")
-        target = int(parts[2]) if len(parts) > 2 and parts[2] else None
-        if target:
-            pending_input[uid] = ("awaiting_credit_amount", target)
-            query.message.edit_text(
-                f"🏦 Sending amount for user <code>{target}</code>:",
-                parse_mode="html",
-            )
-        else:
-            pending_input[uid] = "awaiting_credit_user"
-            query.message.edit_text("🏦 Send the user_id to add credits to:")
-        cb_answer("Send user_id or amount")
 
     elif data == "admin_list_users":
         if str(uid) != str(ADMIN_ID):
@@ -771,7 +745,7 @@ def handle_callback(client: Client, query: types.CallbackQuery):
             status = "✅" if u.get("is_approved") else "❌"
             cr = u.get("credits", 0)
             text += f"{status} <code>{uid_val}</code> — {name} ({cr} cr)\n"
-        query.message.edit_text(text, reply_markup=user_list_kb(users), parse_mode="html")
+        query.message.edit_text(text, reply_markup=user_list_kb(users))
         cb_answer(f"Found {len(users)} users")
 
     elif data.startswith("user_detail|"):
@@ -792,7 +766,7 @@ def handle_callback(client: Client, query: types.CallbackQuery):
             f"Credits: <code>{cr}</code>\n"
             f"Lookups: <code>{lookups}</code>\n"
         )
-        query.message.edit_text(text, reply_markup=user_action_kb(target_uid), parse_mode="html")
+        query.message.edit_text(text, reply_markup=user_action_kb(target_uid))
         cb_answer(f"User {target_uid}")
 
     elif data.startswith("toggle_approve|"):
@@ -818,19 +792,19 @@ def handle_callback(client: Client, query: types.CallbackQuery):
             status = "✅" if u.get("is_approved") else "❌"
             cr = u.get("credits", 0)
             text += f"{status} <code>{uid_val}</code> — {name} ({cr} cr)\n"
-        query.message.edit_text(text, reply_markup=user_list_kb(users), parse_mode="html")
+        query.message.edit_text(text, reply_markup=user_list_kb(users))
+        cb_answer("User toggled")
 
     elif data.startswith("admin_add_credit|"):
         if str(uid) != str(ADMIN_ID):
             cb_answer("⛔ Admin only", alert=True)
             return
         parts = data.split("|")
-        target_uid = int(parts[2]) if len(parts) > 2 and parts[2] else None
+        target_uid = int(parts[1]) if len(parts) > 1 and parts[1] else None
         if target_uid:
             pending_input[uid] = ("awaiting_credit_amount", target_uid)
             query.message.edit_text(
                 f"🏦 Send amount for user <code>{target_uid}</code>:",
-                parse_mode="html",
             )
             cb_answer("Send amount")
         else:
@@ -856,7 +830,7 @@ def handle_callback(client: Client, query: types.CallbackQuery):
             f"✅ Approvals: <code>{stats.get('approvals', 0)}</code>\n"
             f"🚫 Revocations: <code>{stats.get('revocations', 0)}</code>\n"
         )
-        query.message.edit_text(text, reply_markup=admin_kb(), parse_mode="html")
+        query.message.edit_text(text, reply_markup=admin_kb())
         cb_answer("Stats")
 
     elif data == "back_to_admin":
@@ -865,7 +839,6 @@ def handle_callback(client: Client, query: types.CallbackQuery):
             return
         query.message.edit_text(
             "👑 <b>Admin Panel</b>\n\n",
-            parse_mode="html",
             reply_markup=admin_kb(),
         )
         cb_answer("Back")
