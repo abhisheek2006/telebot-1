@@ -1,5 +1,7 @@
 import os
 import logging
+import random
+import string
 import requests
 from datetime import datetime, timezone
 from pyrogram import Client, enums, filters, types
@@ -40,6 +42,9 @@ logging.info("MongoDB connected: %s", db.name)
 
 CREDIT_PER_LOOKUP = int(os.environ.get("CREDIT_PER_LOOKUP", "1"))
 DEFAULT_NEW_USER_CREDITS = int(os.environ.get("DEFAULT_NEW_USER_CREDITS", "5"))
+REFERRAL_WELCOME_CREDITS = int(os.environ.get("REFERRAL_WELCOME_CREDITS", "3"))
+REFERRAL_THRESHOLD = int(os.environ.get("REFERRAL_THRESHOLD", "5"))
+REFERRAL_BONUS_CREDITS = int(os.environ.get("REFERRAL_BONUS_CREDITS", "10"))
 
 pending_input = {}
 
@@ -66,6 +71,9 @@ def get_or_create_user(user_id: int, first_name: str = "User", username: str = N
     uid_str = str(user_id)
     doc = users_col.find_one({"user_id_str": uid_str})
     if not doc:
+        ref_code = generate_referral_code()
+        while users_col.find_one({"referral_code": ref_code}):
+            ref_code = generate_referral_code()
         doc = {
             "user_id": user_id,
             "user_id_str": uid_str,
@@ -73,18 +81,25 @@ def get_or_create_user(user_id: int, first_name: str = "User", username: str = N
             "username": username or "",
             "is_approved": bool(ADMIN_ID and uid_str == str(ADMIN_ID)),
             "credits": DEFAULT_NEW_USER_CREDITS,
+            "referral_code": ref_code,
+            "referrals_count": 0,
+            "referred_by": None,
             "total_lookups": 0,
             "created_at": datetime.now(timezone.utc),
         }
         users_col.insert_one(doc)
-        logging.info("New user created: %s (%s)", uid_str, first_name)
+        logging.info("New user created: %s (%s) — ref code: %s", uid_str, first_name, ref_code)
     else:
         update_data = {"$set": {"first_name": first_name}}
         if username:
             update_data["$set"]["username"] = username
-        if not doc.get("credits") and doc.get("credits") != 0:
-            update_data["$setOn"] = {"credits": DEFAULT_NEW_USER_CREDITS}
+        if not doc.get("referral_code"):
+            new_code = generate_referral_code()
+            while users_col.find_one({"referral_code": new_code}):
+                new_code = generate_referral_code()
+            update_data["$set"]["referral_code"] = new_code
         users_col.update_one({"user_id_str": uid_str}, update_data)
+        doc["referral_code"] = update_data["$set"].get("referral_code", doc.get("referral_code"))
     return doc
 
 
@@ -135,6 +150,76 @@ def bump_stat(key: str, amount: int = 1):
     stats_col.update_one({'_id': 'bot'}, {'$inc': {key: amount}}, upsert=True)
 
 
+def safe_edit_text(message: types.Message, text: str, **kwargs):
+    try:
+        message.edit_text(text, **kwargs)
+    except Exception as e:
+        if "MESSAGE_NOT_MODIFIED" not in str(e):
+            logging.warning("Edit failed: %s", e)
+        try:
+            message.reply_text(text, **kwargs)
+        except Exception as e2:
+            logging.warning("Reply also failed: %s", e2)
+
+
+def generate_referral_code(length: int = 8) -> str:
+    chars = string.ascii_lowercase + string.digits
+    return ''.join(random.choices(chars, k=length))
+
+
+def register_referral(user_id: int, referral_code: str) -> bool:
+    if not referral_code:
+        return False
+    uid_str = str(user_id)
+    referrer = users_col.find_one({"referral_code": referral_code})
+    if not referrer:
+        return False
+    if str(referrer["user_id"]) == uid_str:
+        return False
+    existing = users_col.find_one({"user_id_str": uid_str, "referred_by": {"$ne": None}})
+    if existing:
+        return False
+    users_col.update_one(
+        {"user_id_str": str(referrer["user_id"])},
+        {"$inc": {"referrals_count": 1}},
+    )
+    users_col.update_one(
+        {"user_id_str": uid_str},
+        {"$set": {"referred_by": str(referrer["user_id"])},
+         "$inc": {"credits": REFERRAL_WELCOME_CREDITS}},
+    )
+    bump_stat("referrals")
+    updated_referrer = users_col.find_one({"user_id_str": str(referrer["user_id"])})
+    if updated_referrer and updated_referrer.get("referrals_count", 0) % REFERRAL_THRESHOLD == 0:
+        add_credits(referrer["user_id"], REFERRAL_BONUS_CREDITS)
+        bump_stat("referral_bonuses")
+        try:
+            bot_me = app.get_me()
+            bot_username = bot_me.username
+        except Exception:
+            bot_username = "yourbot"
+        ref_link = f"https://t.me/{bot_username}?start={referral_code}"
+        try:
+            app.send_message(
+                referrer["user_id"],
+                f"🎉 <b>Referral Bonus!</b>\n\n"
+                f"You reached {updated_referrer['referrals_count']} referrals!\n"
+                f"🎁 You received <b>{REFERRAL_BONUS_CREDITS}</b> bonus credits.\n\n"
+                f"Your referral link:\n{ref_link}",
+            )
+        except Exception:
+            pass
+    return True
+
+
+def get_bot_username() -> str:
+    try:
+        bot_me = app.get_me()
+        return bot_me.username
+    except Exception:
+        return os.environ.get("BOT_USERNAME", "yourbot")
+
+
 # ─────────────────────────────── Keyboards ───────────────────────────────
 def main_menu_kb() -> types.InlineKeyboardMarkup:
     return types.InlineKeyboardMarkup(
@@ -150,6 +235,12 @@ def main_menu_kb() -> types.InlineKeyboardMarkup:
                     "💰 Check Balance", callback_data="balance",
                     style=enums.ButtonStyle.SUCCESS,
                 ),
+                types.InlineKeyboardButton(
+                    "🤝 Referral", callback_data="referral",
+                    style=enums.ButtonStyle.DEFAULT,
+                ),
+            ],
+            [
                 types.InlineKeyboardButton(
                     "❓ Help", callback_data="help",
                     style=enums.ButtonStyle.DEFAULT,
@@ -297,6 +388,8 @@ def handle_message(client: Client, message: types.Message):
             _cmd_admin(message)
         elif cmd == "balance":
             _cmd_balance(message)
+        elif cmd == "referral":
+            _cmd_referral(message)
         elif cmd == "listusers":
             _cmd_admin_list(message)
         elif cmd == "stats":
@@ -318,18 +411,159 @@ def handle_message(client: Client, message: types.Message):
         _handle_text_input(message)
 
 
+@app.on_message(filters.group)
+def handle_group_message(client: Client, message: types.Message):
+    user_id = message.from_user.id
+    first_name = message.from_user.first_name or "User"
+    username = message.from_user.username or None
+    get_or_create_user(user_id, first_name, username)
+
+    if message.text and message.text.startswith("/"):
+        cmd = message.text.split()[0].lstrip("/").lower()
+
+        if cmd == "start":
+            start_payload = None
+            parts = message.text.split()
+            if len(parts) > 1:
+                start_payload = parts[1].strip()
+            if start_payload and len(start_payload) >= 3:
+                referred = register_referral(user_id, start_payload)
+                if referred:
+                    doc = get_user(user_id)
+                    message.reply_text(
+                        f"✅ {first_name}, your referral was applied!\n"
+                        f"Credits: {doc.get('credits', 0)}\n"
+                        "Please use /balance in private for full details."
+                    )
+                    return
+            bot_username = get_bot_username()
+            text = (
+                f"👋 Hello {first_name}!\n\n"
+                "I'm a phone number lookup bot.\n\n"
+                "Use me in <b>private chat</b> for full features:\n"
+                f"👉 @{bot_username}\n\n"
+                "Available commands:\n"
+                "/start — welcome\n"
+                "/help — help info\n"
+                "/balance — check credits\n"
+                "/referral — referral program"
+            )
+            message.reply_text(text)
+            return
+
+        if cmd == "help":
+            text = (
+                "📖 <b>How to use this bot</b>\n\n"
+                "• 🔍 Lookup phone numbers\n"
+                f"• 💰 Cost: {CREDIT_PER_LOOKUP} credit per lookup\n"
+                "• 🤝 Referral program: invite friends for bonus credits\n\n"
+                "Use /balance or /referral here, or switch to private chat."
+            )
+            message.reply_text(text)
+            return
+
+        if cmd == "balance":
+            doc = get_user(user_id)
+            if not doc:
+                message.reply_text("❌ Please start the bot in private first.")
+                return
+            credits = doc.get("credits", 0)
+            lookups = doc.get("total_lookups", 0)
+            approved = is_approved(user_id)
+            status = "✅ Approved" if approved else "⏳ Pending approval"
+            text = (
+                f"💰 <b>{first_name}'s Balance</b>\n\n"
+                f"Status: {status}\n"
+                f"Credits: <code>{credits}</code>\n"
+                f"Lookups: <code>{lookups}</code>\n"
+                f"Cost per lookup: <code>{CREDIT_PER_LOOKUP}</code>"
+            )
+            message.reply_text(text)
+            return
+
+        if cmd == "referral":
+            doc = get_user(user_id)
+            if not doc:
+                message.reply_text("❌ Please start the bot in private first.")
+                return
+            if not is_approved(user_id):
+                message.reply_text("⛔ You are not authorized.")
+                return
+            referral_code = doc.get("referral_code", "N/A")
+            referrals_count = doc.get("referrals_count", 0)
+            bot_username = get_bot_username()
+            ref_link = f"https://t.me/{bot_username}?start={referral_code}"
+            remaining = REFERRAL_THRESHOLD - (referrals_count % REFERRAL_THRESHOLD)
+            text = (
+                f"🤝 <b>Referral Program</b>\n\n"
+                f"🔗 Your link: <code>{ref_link}</code>\n"
+                f"📊 Referrals: <code>{referrals_count}</code>\n"
+                f"🎁 Reward: {REFERRAL_BONUS_CREDITS} credits per {REFERRAL_THRESHOLD} referrals\n"
+                f"⏳ Next bonus: {remaining} more"
+            )
+            message.reply_text(text)
+            return
+
+        message.reply_text(
+            f"ℹ️ {first_name}, use the bot in <b>private chat</b> for lookups.\n"
+            f"👉 @{get_bot_username()}"
+        )
+        return
+
+    if message.text and (message.text.replace("+", "").isdigit() or
+                          (len(message.text) >= 5 and all(c.isdigit() or c in '+ ' for c in message.text))):
+        message.reply_text(
+            f"🔒 {first_name}, phone number lookups are only available in <b>private chat</b> "
+            f"for privacy reasons.\nPlease use /start in private: @{get_bot_username()}"
+        )
+        return
+
+    if not message.text.startswith("/"):
+        return
+
+
 def _cmd_start(message: types.Message):
     uid = message.from_user.id
     first_name = message.from_user.first_name or "User"
+    
+    start_payload = None
+    parts = message.text.split()
+    if len(parts) > 1:
+        start_payload = parts[1].strip()
+    
     doc = get_or_create_user(uid, first_name, message.from_user.username)
+    
+    ref_credit_msg = ""
+    if start_payload and len(start_payload) >= 3:
+        referred = register_referral(uid, start_payload)
+        if referred:
+            doc = get_user(uid)
+            ref_credit_msg = (
+                f"\n\n🎁 <b>Referral bonus!</b> You received "
+                f"{REFERRAL_WELCOME_CREDITS} extra credits for joining via a referral link."
+            )
+            credits = doc.get("credits", 0)
+            message.reply_text(
+                f"✅ Referral applied! Total credits: {credits}{ref_credit_msg}",
+                reply_markup=main_menu_kb(),
+            )
 
     if is_approved(uid):
         credits = doc.get("credits", 0)
+        referral_code = doc.get("referral_code", "N/A")
+        bot_username = get_bot_username()
+        ref_link = f"https://t.me/{bot_username}?start={referral_code}"
+        if ref_credit_msg:
+            welcome_msg = "👋 Welcome! You joined via a referral link."
+        else:
+            welcome_msg = f"👋 Welcome back, {first_name}!"
         text = (
-            f"👋 Welcome back, {first_name}!\n\n"
+            f"{welcome_msg}\n\n"
             f"💰 You have {credits} credit(s).\n"
             f"🔍 Send a phone number to look it up (costs {CREDIT_PER_LOOKUP} credit).\n"
-            f"Example: 947426561"
+            f"🤝 Invite friends with your referral link:\n"
+            f"<code>{ref_link}</code>\n\n"
+            f"📈 Get {REFERRAL_BONUS_CREDITS} bonus credits for every {REFERRAL_THRESHOLD} referrals!"
         )
         message.reply_text(text, reply_markup=admin_kb() if str(uid) == str(ADMIN_ID) else main_menu_kb())
     else:
@@ -373,6 +607,7 @@ def _cmd_help(message: types.Message):
         "📋 Buttons:\n"
         "• Lookup Number — start a lookup\n"
         "• Check Balance — view your credit balance\n"
+        "• Referral — invite friends for bonus credits\n"
         "• Help — show this help\n\n"
         "👑 Admin:\n"
         "/admin — open admin panel\n"
@@ -407,6 +642,35 @@ def _cmd_balance(message: types.Message):
     message.reply_text(text, reply_markup=kb)
 
 
+def _cmd_referral(message: types.Message):
+    if not is_approved(message.from_user.id):
+        message.reply_text("⛔ You are not authorized.", reply_markup=buy_credit_kb())
+        return
+    uid = message.from_user.id
+    doc = get_user(uid)
+    if not doc:
+        message.reply_text("❌ User not found. Use /start first.")
+        return
+    referral_code = doc.get("referral_code", "N/A")
+    referrals_count = doc.get("referrals_count", 0)
+    bot_username = get_bot_username()
+    ref_link = f"https://t.me/{bot_username}?start={referral_code}"
+    remaining = REFERRAL_THRESHOLD - (referrals_count % REFERRAL_THRESHOLD)
+    text = (
+        f"🤝 <b>Referral Program</b>\n\n"
+        f"🔗 <b>Your referral link:</b>\n"
+        f"<code>{ref_link}</code>\n\n"
+        f"📊 <b>Total referrals:</b> {referrals_count}\n"
+        f"🎁 <b>Reward:</b> {REFERRAL_BONUS_CREDITS} bonus credits every {REFERRAL_THRESHOLD} referrals\n"
+        f"⏳ <b>Next bonus in:</b> {remaining} more referral(s)\n\n"
+        f"Share your link! Each friend who joins via your link gets "
+        f"{DEFAULT_NEW_USER_CREDITS} welcome credits + "
+        f"{REFERRAL_WELCOME_CREDITS} referral bonus."
+    )
+    is_admin = str(uid) == str(ADMIN_ID)
+    message.reply_text(text, reply_markup=admin_kb() if is_admin else main_menu_kb())
+
+
 def _cmd_add_credit(message: types.Message):
     if str(message.from_user.id) != str(ADMIN_ID):
         message.reply_text("⛔ Admin only.")
@@ -420,6 +684,7 @@ def _cmd_add_credit(message: types.Message):
 
 def _cmd_approve(message: types.Message):
     if str(message.from_user.id) != str(ADMIN_ID):
+        message.reply_text("⛔ Admin only.")
         return
     parts = message.text.split()
     if len(parts) < 2:
@@ -451,6 +716,7 @@ def _notify_approved(uid: int, by: str):
 
 def _cmd_revoke(message: types.Message):
     if str(message.from_user.id) != str(ADMIN_ID):
+        message.reply_text("⛔ Admin only.")
         return
     parts = message.text.split()
     if len(parts) < 2:
@@ -469,6 +735,7 @@ def _cmd_revoke(message: types.Message):
 
 def _cmd_admin_list(message: types.Message):
     if str(message.from_user.id) != str(ADMIN_ID):
+        message.reply_text("⛔ Admin only.")
         return
     users = list(users_col.find({}))
     if not users:
@@ -486,6 +753,7 @@ def _cmd_admin_list(message: types.Message):
 
 def _cmd_admin_stats(message: types.Message):
     if str(message.from_user.id) != str(ADMIN_ID):
+        message.reply_text("⛔ Admin only.")
         return
     stats = stats_col.find_one({"_id": "bot"}) or {}
     users = list(users_col.find({}))
@@ -498,6 +766,8 @@ def _cmd_admin_stats(message: types.Message):
         f"✅ Approved: <code>{approved_count}</code>\n"
         f"💰 Total credits: <code>{total_credits}</code>\n"
         f"🔍 Total lookups: <code>{total_lookups}</code>\n"
+        f"🤝 Referrals: <code>{stats.get('referrals', 0)}</code>\n"
+        f"🎁 Referral bonuses: <code>{stats.get('referral_bonuses', 0)}</code>\n"
         f"✅ Approvals: <code>{stats.get('approvals', 0)}</code>\n"
         f"🚫 Revocations: <code>{stats.get('revocations', 0)}</code>\n"
         f"👑 Admin ID: <code>{ADMIN_ID}</code>\n"
@@ -700,21 +970,21 @@ def handle_callback(client: Client, query: types.CallbackQuery):
     if data == "lookup":
         if not is_approved(uid):
             cb_answer("⛔ Not approved", alert=True)
-            query.message.edit_text(
+            safe_edit_text(query.message,
                 "⛔ You are not authorized. Contact admin.",
                 reply_markup=buy_credit_kb(),
             )
             return
         doc = get_user(uid)
         if doc.get("credits", 0) < CREDIT_PER_LOOKUP:
-            query.message.edit_text(
+            safe_edit_text(query.message,
                 f"⚠️ Insufficient credits! You have {doc.get('credits', 0)}, "
                 f"need {CREDIT_PER_LOOKUP}.",
                 reply_markup=buy_credit_kb(),
             )
             return
         pending_input[uid] = "awaiting_lookup_number"
-        query.message.edit_text(
+        safe_edit_text(query.message,
             "🔍 <b>Send phone number</b>\nExample: <code>947426561</code>",
         )
         cb_answer("Enter number")
@@ -726,16 +996,49 @@ def handle_callback(client: Client, query: types.CallbackQuery):
         doc = get_user(uid)
         credits = doc.get("credits", 0)
         lookups = doc.get("total_lookups", 0)
+        referrals = doc.get("referrals_count", 0)
+        referral_code = doc.get("referral_code", "N/A")
+        bot_username = get_bot_username()
+        ref_link = f"https://t.me/{bot_username}?start={referral_code}"
         kb = admin_kb() if str(uid) == str(ADMIN_ID) else main_menu_kb()
-        query.message.edit_text(
-            f"💰 <b>Balance</b>\n\nCredits: <code>{credits}</code>\n"
-            f"Lookups: <code>{lookups}</code>",
+        safe_edit_text(query.message,
+            f"💰 <b>Balance</b>\n\n"
+            f"Credits: <code>{credits}</code>\n"
+            f"Lookups: <code>{lookups}</code>\n"
+            f"Referrals: <code>{referrals}</code>\n"
+            f"🔗 Your link: <code>{ref_link}</code>",
             reply_markup=kb,
         )
         cb_answer("Balance updated")
 
+    elif data == "referral":
+        if not is_approved(uid):
+            cb_answer("⛔ Not approved", alert=True)
+            return
+        doc = get_user(uid)
+        if not doc:
+            safe_edit_text(query.message, "❌ Error loading referral data. Use /start.", reply_markup=main_menu_kb())
+            return
+        referral_code = doc.get("referral_code", "N/A")
+        referrals_count = doc.get("referrals_count", 0)
+        bot_username = get_bot_username()
+        ref_link = f"https://t.me/{bot_username}?start={referral_code}"
+        remaining = REFERRAL_THRESHOLD - (referrals_count % REFERRAL_THRESHOLD)
+        kb = admin_kb() if str(uid) == str(ADMIN_ID) else main_menu_kb()
+        safe_edit_text(query.message, 
+            f"🤝 <b>Referral Program</b>\n\n"
+            f"🔗 <b>Your referral link:</b>\n"
+            f"<code>{ref_link}</code>\n\n"
+            f"📊 <b>Total referrals:</b> {referrals_count}\n"
+            f"🎁 <b>Reward:</b> {REFERRAL_BONUS_CREDITS} bonus credits every {REFERRAL_THRESHOLD} referrals\n"
+            f"⏳ <b>Next bonus in:</b> {remaining} more referral(s)\n\n"
+            f"Share your link! Each friend gets {DEFAULT_NEW_USER_CREDITS} welcome credits.",
+            reply_markup=kb,
+        )
+        cb_answer("Referral info")
+
     elif data == "help":
-        query.message.edit_text(
+        safe_edit_text(query.message, 
             "📖 <b>Help</b>\n\n"
             "Send a phone number to look it up.\n"
             f"Cost: {CREDIT_PER_LOOKUP} credit per lookup.\n"
@@ -745,7 +1048,7 @@ def handle_callback(client: Client, query: types.CallbackQuery):
         cb_answer("Help")
 
     elif data == "buy_credit":
-        query.message.edit_text(
+        safe_edit_text(query.message, 
             "💰 <b>Buy Credit</b>\n\n"
             "Contact the admin (@Ankit_jii25) to get more credits.\n"
             "You'll be notified once credits are added.",
@@ -759,7 +1062,7 @@ def handle_callback(client: Client, query: types.CallbackQuery):
             return
         users = list(users_col.find({}))
         if not users:
-            query.message.edit_text("📋 No users found.", reply_markup=admin_kb())
+            safe_edit_text(query.message, "📋 No users found.", reply_markup=admin_kb())
             return
         text = f"📋 <b>Users ({len(users)})</b>\n\n"
         for u in users:
@@ -768,7 +1071,7 @@ def handle_callback(client: Client, query: types.CallbackQuery):
             status = "✅" if u.get("is_approved") else "❌"
             cr = u.get("credits", 0)
             text += f"{status} <code>{uid_val}</code> — {name} ({cr} cr)\n"
-        query.message.edit_text(text, reply_markup=user_list_kb(users))
+        safe_edit_text(query.message, text, reply_markup=user_list_kb(users))
         cb_answer(f"Found {len(users)} users")
 
     elif data.startswith("user_detail|"):
@@ -789,7 +1092,7 @@ def handle_callback(client: Client, query: types.CallbackQuery):
             f"Credits: <code>{cr}</code>\n"
             f"Lookups: <code>{lookups}</code>\n"
         )
-        query.message.edit_text(text, reply_markup=user_action_kb(target_uid))
+        safe_edit_text(query.message, text, reply_markup=user_action_kb(target_uid))
         cb_answer(f"User {target_uid}")
 
     elif data.startswith("toggle_approve|"):
@@ -815,7 +1118,7 @@ def handle_callback(client: Client, query: types.CallbackQuery):
             status = "✅" if u.get("is_approved") else "❌"
             cr = u.get("credits", 0)
             text += f"{status} <code>{uid_val}</code> — {name} ({cr} cr)\n"
-        query.message.edit_text(text, reply_markup=user_list_kb(users))
+        safe_edit_text(query.message, text, reply_markup=user_list_kb(users))
         cb_answer("User toggled")
 
     elif data.startswith("admin_add_credit|"):
@@ -826,13 +1129,13 @@ def handle_callback(client: Client, query: types.CallbackQuery):
         target_uid = int(parts[1]) if len(parts) > 1 and parts[1] else None
         if target_uid:
             pending_input[uid] = ("awaiting_credit_amount", target_uid)
-            query.message.edit_text(
+            safe_edit_text(query.message, 
                 f"🏦 Send amount for user <code>{target_uid}</code>:",
             )
             cb_answer("Send amount")
         else:
             pending_input[uid] = "awaiting_credit_user"
-            query.message.edit_text("🏦 Send the user_id:")
+            safe_edit_text(query.message, "🏦 Send the user_id:")
             cb_answer("Send user_id")
 
     elif data == "admin_stats":
@@ -850,17 +1153,19 @@ def handle_callback(client: Client, query: types.CallbackQuery):
             f"✅ Approved: <code>{approved_count}</code>\n"
             f"💰 Credits: <code>{total_credits}</code>\n"
             f"🔍 Lookups: <code>{total_lookups}</code>\n"
+            f"🤝 Referrals: <code>{stats.get('referrals', 0)}</code>\n"
+            f"🎁 Referral bonuses: <code>{stats.get('referral_bonuses', 0)}</code>\n"
             f"✅ Approvals: <code>{stats.get('approvals', 0)}</code>\n"
             f"🚫 Revocations: <code>{stats.get('revocations', 0)}</code>\n"
         )
-        query.message.edit_text(text, reply_markup=admin_kb())
+        safe_edit_text(query.message, text, reply_markup=admin_kb())
         cb_answer("Stats")
 
     elif data == "back_to_admin":
         if str(uid) != str(ADMIN_ID):
             cb_answer("⛔ Admin only", alert=True)
             return
-        query.message.edit_text(
+        safe_edit_text(query.message, 
             "👑 <b>Admin Panel</b>\n\n",
             reply_markup=admin_kb(),
         )
@@ -879,7 +1184,7 @@ def handle_callback(client: Client, query: types.CallbackQuery):
             cb_answer("Approved!", alert=True)
             bump_stat("approvals")
             _notify_approved(target_uid, query.from_user.first_name)
-            query.message.edit_text(
+            safe_edit_text(query.message, 
                 f"✅ User {target_uid} approved.",
                 reply_markup=admin_kb(),
             )
@@ -891,7 +1196,7 @@ def handle_callback(client: Client, query: types.CallbackQuery):
         target_uid = int(data.split("|")[1])
         users_col.delete_one({"user_id_str": str(target_uid)})
         cb_answer("Denied!", alert=True)
-        query.message.edit_text(
+        safe_edit_text(query.message, 
             f"❌ User {target_uid} denied.",
             reply_markup=admin_kb(),
         )
@@ -904,7 +1209,8 @@ if __name__ == "__main__":
     print(f"👑 Admin ID: {ADMIN_ID}")
     print(f"💰 Credits/lookup: {CREDIT_PER_LOOKUP}")
     print(f"🆕 New user credits: {DEFAULT_NEW_USER_CREDITS}")
+    print(f"🤝 Referral: {REFERRAL_WELCOME_CREDITS} welcome + {REFERRAL_BONUS_CREDITS} bonus per {REFERRAL_THRESHOLD} referrals")
     users_count = users_col.count_documents({})
     print(f"📂 MongoDB users loaded: {users_count}")
-    print("📲 Bot running...")
+    print("📲 Bot running (private + group modes)...")
     app.run()
