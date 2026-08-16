@@ -1,69 +1,64 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Users - Bot Admin</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-    <nav class="navbar">
-        <div class="nav-brand">🤖 Bot Admin</div>
-        <div class="nav-links">
-            <a href="{{ url_for('dashboard') }}">Dashboard</a>
-            <a href="{{ url_for('users_list') }}" class="active">Users</a>
-            <a href="{{ url_for('codes_list') }}">Redeem Codes</a>
-            <a href="{{ url_for('logout') }}" class="btn-logout">Logout</a>
-        </div>
-    </nav>
+{% extends "base.html" %}
 
-    <main class="container">
-        <h1>Users ({{ users|length }})</h1>
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% for category, msg in messages %}
-                <div class="alert alert-{{ category }}">{{ msg }}</div>
+{% block title %}Users - Bot Admin{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1>Users <span style="color: var(--text-muted); font-size:18px;">({{ users|length }})</span></h1>
+        <p class="page-sub">Search and manage all bot users</p>
+    </div>
+    <div class="search-bar">
+        <input class="input" type="search" id="user-search" placeholder="Search name, username or ID..." value="{{ q }}">
+    </div>
+</div>
+
+{% if users %}
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Username</th>
+                <th>Status</th>
+                <th>Credits</th>
+                <th>Lookups</th>
+                <th>Referrals</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in users %}
+            <tr data-search-row="{{ u.user_id }} {{ u.first_name }} {{ u.username or '' }} {{ u.referral_code }}">
+                <td data-label="ID"><span class="mono">{{ u.user_id }}</span></td>
+                <td data-label="Name"><strong>{{ u.first_name }}</strong></td>
+                <td data-label="Username">@{{ u.username or '-' }}</td>
+                <td data-label="Status">
+                    {% if u.is_approved %}
+                        <span class="badge badge-success">Approved</span>
+                    {% else %}
+                        <span class="badge badge-danger">Pending</span>
+                    {% endif %}
+                </td>
+                <td data-label="Credits"><span class="mono">{{ u.credits }}</span></td>
+                <td data-label="Lookups"><span class="mono">{{ u.total_lookups }}</span></td>
+                <td data-label="Referrals"><span class="mono">{{ u.referrals_count }}</span></td>
+                <td data-label="Created">{{ u.created_at.strftime('%Y-%m-%d') if u.created_at else '-' }}</td>
+                <td data-label="Actions">
+                    <a href="{{ url_for('user_detail', user_id=u.user_id) }}" class="btn btn-sm">View</a>
+                </td>
+            </tr>
             {% endfor %}
-        {% endwith %}
-        <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Name</th>
-                        <th>Username</th>
-                        <th>Status</th>
-                        <th>Credits</th>
-                        <th>Lookups</th>
-                        <th>Referrals</th>
-                        <th>Created</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for u in users %}
-                    <tr>
-                        <td>{{ u.user_id }}</td>
-                        <td>{{ u.first_name }}</td>
-                        <td>@{{ u.username or '-' }}</td>
-                        <td>
-                            {% if u.is_approved %}
-                                <span class="badge badge-success">Approved</span>
-                            {% else %}
-                                <span class="badge badge-danger">Pending</span>
-                            {% endif %}
-                        </td>
-                        <td>{{ u.credits }}</td>
-                        <td>{{ u.total_lookups }}</td>
-                        <td>{{ u.referrals_count }}</td>
-                        <td>{{ u.created_at.strftime('%Y-%m-%d') if u.created_at else '-' }}</td>
-                        <td>
-                            <a href="{{ url_for('user_detail', user_id=u.user_id) }}" class="btn btn-sm">View</a>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </main>
-</body>
-</html>
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card empty-state">
+    <div class="empty-icon">👥</div>
+    <h3>{{ 'No users match your search' if q else 'No users yet' }}</h3>
+    <p>{{ 'Try a different search term.' if q else 'Users appear here when they start the bot.' }}</p>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Bot Admin{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-inner">
+            <a href="{{ url_for('dashboard') }}" class="nav-brand">
+                <span class="brand-mark">🤖</span>
+                <span>Bot Admin</span>
+            </a>
+            <div class="nav-links" data-nav-links>
+                <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.endpoint == 'dashboard' }}">Dashboard</a>
+                <a href="{{ url_for('users_list') }}" class="{{ 'active' if request.endpoint == 'users_list' or request.endpoint == 'user_detail' }}">Users</a>
+                <a href="{{ url_for('codes_list') }}" class="{{ 'active' if request.endpoint == 'codes_list' }}">Redeem Codes</a>
+                <a href="{{ url_for('profile') }}" class="{{ 'active' if request.endpoint == 'profile' }}">Profile</a>
+                <a href="{{ url_for('logout') }}" class="btn-logout">Logout</a>
+            </div>
+            <div class="nav-actions">
+                <button class="icon-btn" data-theme-toggle aria-label="Toggle theme">🌙</button>
+                <button class="icon-btn hamburger" data-menu-toggle aria-label="Menu">☰</button>
+            </div>
+        </div>
+    </nav>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-wrap">
+            {% for category, msg in messages %}
+                <div class="alert alert-{{ category }}">{{ msg }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    {% endwith %}
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

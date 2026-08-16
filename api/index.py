@@ -4,6 +4,7 @@ import random
 import string
 from datetime import datetime, timezone
 from flask import Flask, render_template, request, redirect, url_for, session, flash
+from werkzeug.security import generate_password_hash, check_password_hash
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
@@ -24,12 +25,14 @@ MONGO_URI = os.environ.get(
 )
 ADMIN_ID = os.environ.get("ADMIN_ID")
 WEB_PASSWORD = os.environ.get("WEB_PASSWORD", "admin123")
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@botpanel.com")
 
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client.telegram_bot
 users_col = db.users
 stats_col = db.stats
 codes_col = db.redeem_codes
+settings_col = db.admin_settings
 
 
 def generate_redeem_code(length: int = 10) -> str:
@@ -57,6 +60,25 @@ def create_redeem_codes(amount_credits: int, count: int = 1, created_by: int = N
     return created
 
 
+def ensure_admin_settings():
+    """Seed admin settings (email + password hash) from env on first use."""
+    doc = settings_col.find_one({"_id": "admin"})
+    if doc:
+        return doc
+    doc = {
+        "_id": "admin",
+        "email": ADMIN_EMAIL,
+        "password_hash": generate_password_hash(WEB_PASSWORD),
+        "updated_at": datetime.now(timezone.utc),
+    }
+    settings_col.insert_one(doc)
+    return doc
+
+
+def get_admin_settings():
+    return settings_col.find_one({"_id": "admin"}) or ensure_admin_settings()
+
+
 def login_required(view):
     @functools.wraps(view)
     def wrapped(*args, **kwargs):
@@ -76,19 +98,27 @@ def index():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
-        if password == WEB_PASSWORD:
+        settings = ensure_admin_settings()
+        email_ok = email == settings.get("email", "").lower()
+        pass_ok = check_password_hash(settings.get("password_hash", ""), password)
+        if email_ok and pass_ok:
             session["logged_in"] = True
-            flash("Logged in successfully.", "success")
+            session["admin_email"] = settings.get("email")
+            flash("Welcome back! You are logged in.", "success")
             return redirect(url_for("dashboard"))
-        flash("Incorrect password.", "danger")
+        if not email_ok:
+            flash("Unknown email address.", "danger")
+        else:
+            flash("Incorrect password.", "danger")
     return render_template("login.html")
 
 
 @app.route("/logout")
 def logout():
     session.clear()
-    flash("Logged out.", "success")
+    flash("You have been logged out.", "success")
     return redirect(url_for("login"))
 
 
@@ -113,6 +143,7 @@ def dashboard():
         "referral_bonuses": stats.get("referral_bonuses", 0),
         "redeems": stats.get("redeems", 0),
         "codes_generated": stats.get("codes_generated", 0),
+        "broadcasts": stats.get("broadcasts", 0),
     }
     return render_template("dashboard.html", stats=card_stats)
 
@@ -120,8 +151,26 @@ def dashboard():
 @app.route("/users")
 @login_required
 def users_list():
-    users = list(users_col.find({}))
-    return render_template("users.html", users=users)
+    q = request.args.get("q", "").strip().lower()
+    query = {}
+    if q:
+        from bson import ObjectId
+        try:
+            q_int = int(q)
+            query = {"$or": [
+                {"user_id": q_int},
+                {"first_name": {"$regex": q, "$options": "i"}},
+                {"username": {"$regex": q, "$options": "i"}},
+                {"referral_code": {"$regex": q, "$options": "i"}},
+            ]}
+        except ValueError:
+            query = {"$or": [
+                {"first_name": {"$regex": q, "$options": "i"}},
+                {"username": {"$regex": q, "$options": "i"}},
+                {"referral_code": {"$regex": q, "$options": "i"}},
+            ]}
+    users = list(users_col.find(query).sort("created_at", -1))
+    return render_template("users.html", users=users, q=q)
 
 
 @app.route("/users/<int:user_id>")
@@ -131,7 +180,8 @@ def user_detail(user_id):
     if not user:
         flash("User not found.", "danger")
         return redirect(url_for("users_list"))
-    return render_template("user_detail.html", user=user)
+    redeemed = list(codes_col.find({"used_by": user_id}).sort("used_at", -1))
+    return render_template("user_detail.html", user=user, redeemed_codes=redeemed)
 
 
 @app.route("/users/<int:user_id>/toggle", methods=["POST"])
@@ -142,6 +192,11 @@ def toggle_approve(user_id):
         new_status = not user.get("is_approved", False)
         users_col.update_one(
             {"user_id": user_id}, {"$set": {"is_approved": new_status}}
+        )
+        stats_col.update_one(
+            {"_id": "bot"},
+            {"$inc": {"approvals" if new_status else "revocations": 1}},
+            upsert=True,
         )
         flash(
             f"User {user_id} {'approved' if new_status else 'revoked'}.",
@@ -161,6 +216,9 @@ def add_credits(user_id):
         flash("Enter a valid amount.", "danger")
         return redirect(url_for("user_detail", user_id=user_id))
     users_col.update_one({"user_id": user_id}, {"$inc": {"credits": amount}})
+    stats_col.update_one(
+        {"_id": "bot"}, {"$inc": {"credits_added": amount}}, upsert=True
+    )
     flash(f"Added {amount} credits to user {user_id}.", "success")
     return redirect(url_for("user_detail", user_id=user_id))
 
@@ -211,6 +269,64 @@ def codes_delete(code):
     else:
         flash("Code not found.", "danger")
     return redirect(url_for("codes_list"))
+
+
+@app.route("/profile")
+@login_required
+def profile():
+    settings = get_admin_settings()
+    return render_template("profile.html", settings=settings)
+
+
+@app.route("/profile/email", methods=["POST"])
+@login_required
+def profile_email():
+    settings = get_admin_settings()
+    password = request.form.get("password", "")
+    new_email = request.form.get("email", "").strip().lower()
+    if not check_password_hash(settings.get("password_hash", ""), password):
+        flash("Current password is incorrect.", "danger")
+        return redirect(url_for("profile"))
+    if "@" not in new_email or "." not in new_email:
+        flash("Please enter a valid email address.", "danger")
+        return redirect(url_for("profile"))
+    settings_col.update_one(
+        {"_id": "admin"},
+        {"$set": {"email": new_email, "updated_at": datetime.now(timezone.utc)}},
+    )
+    session["admin_email"] = new_email
+    flash("Email address updated.", "success")
+    return redirect(url_for("profile"))
+
+
+@app.route("/profile/password", methods=["POST"])
+@login_required
+def profile_password():
+    settings = get_admin_settings()
+    current = request.form.get("current_password", "")
+    new_password = request.form.get("new_password", "")
+    confirm = request.form.get("confirm_password", "")
+    if not check_password_hash(settings.get("password_hash", ""), current):
+        flash("Current password is incorrect.", "danger")
+        return redirect(url_for("profile"))
+    if len(new_password) < 6:
+        flash("New password must be at least 6 characters.", "danger")
+        return redirect(url_for("profile"))
+    if new_password != confirm:
+        flash("New passwords do not match.", "danger")
+        return redirect(url_for("profile"))
+    settings_col.update_one(
+        {"_id": "admin"},
+        {"$set": {"password_hash": generate_password_hash(new_password),
+                  "updated_at": datetime.now(timezone.utc)}},
+    )
+    flash("Password changed successfully.", "success")
+    return redirect(url_for("profile"))
+
+
+@app.errorhandler(404)
+def not_found(e):
+    return render_template("404.html"), 404
 
 
 if __name__ == "__main__":

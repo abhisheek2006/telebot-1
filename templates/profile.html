@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Profile - Bot Admin{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1>Profile</h1>
+        <p class="page-sub">Manage your admin account credentials</p>
+    </div>
+</div>
+
+<div style="display:grid; grid-template-columns:1fr; gap:20px; max-width:560px;">
+    <div class="card form-card">
+        <h2>📧 Change Email</h2>
+        <p class="form-sub">Used to sign in to the admin panel.</p>
+        <form method="post" action="{{ url_for('profile_email') }}">
+            <div class="field">
+                <label for="email">New email address</label>
+                <input class="input" type="email" id="email" name="email" value="{{ settings.get('email') }}" required>
+            </div>
+            <div class="field">
+                <label for="email_pass">Enter your password to confirm</label>
+                <div class="input-group">
+                    <input class="input" type="password" id="email_pass" name="password" placeholder="Current password" required autocomplete="current-password">
+                    <button type="button" class="toggle-eye" data-eye-toggle="email_pass" aria-label="Toggle password visibility">👁️</button>
+                </div>
+            </div>
+            <button type="submit" class="btn">Update Email</button>
+        </form>
+    </div>
+
+    <div class="card form-card">
+        <h2>🔒 Change Password</h2>
+        <p class="form-sub">Use a strong password of at least 6 characters.</p>
+        <form method="post" action="{{ url_for('profile_password') }}">
+            <div class="field">
+                <label for="current_password">Current password</label>
+                <div class="input-group">
+                    <input class="input" type="password" id="current_password" name="current_password" placeholder="Current password" required autocomplete="current-password">
+                    <button type="button" class="toggle-eye" data-eye-toggle="current_password" aria-label="Toggle password visibility">👁️</button>
+                </div>
+            </div>
+            <div class="field">
+                <label for="new_password">New password</label>
+                <div class="input-group">
+                    <input class="input" type="password" id="new_password" name="new_password" placeholder="New password" required autocomplete="new-password">
+                    <button type="button" class="toggle-eye" data-eye-toggle="new_password" aria-label="Toggle password visibility">👁️</button>
+                </div>
+            </div>
+            <div class="field">
+                <label for="confirm_password">Confirm new password</label>
+                <div class="input-group">
+                    <input class="input" type="password" id="confirm_password" name="confirm_password" placeholder="Repeat new password" required autocomplete="new-password">
+                    <button type="button" class="toggle-eye" data-eye-toggle="confirm_password" aria-label="Toggle password visibility">👁️</button>
+                </div>
+            </div>
+            <button type="submit" class="btn">Update Password</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

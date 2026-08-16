@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,19 +7,39 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="login-body">
+    <button class="icon-btn login-theme" data-theme-toggle aria-label="Toggle theme">🌙</button>
+
     <div class="login-card">
         <div class="login-logo">🤖</div>
-        <h1>Bot Admin Panel</h1>
-        <p class="login-sub">Enter your password to continue</p>
+        <h1>Admin Panel</h1>
+        <p class="login-sub">Sign in with your email &amp; password</p>
+
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% for category, msg in messages %}
                 <div class="alert alert-{{ category }}">{{ msg }}</div>
             {% endfor %}
         {% endwith %}
+
         <form method="post" action="{{ url_for('login') }}">
-            <input type="password" name="password" placeholder="Password" required autofocus>
-            <button type="submit">Login</button>
+            <div class="field">
+                <label for="email">Email address</label>
+                <input class="input" type="email" id="email" name="email"
+                       placeholder="admin@botpanel.com" required autocomplete="email" autofocus>
+            </div>
+            <div class="field">
+                <label for="password">Password</label>
+                <div class="input-group">
+                    <input class="input" type="password" id="password" name="password"
+                           placeholder="Enter your password" required autocomplete="current-password">
+                    <button type="button" class="toggle-eye" data-eye-toggle="password" aria-label="Toggle password visibility">👁️</button>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-lg btn-block">Sign In</button>
         </form>
+
+        <p class="login-foot">Bot Admin Panel · Manage users, credits &amp; codes</p>
     </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

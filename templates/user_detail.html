@@ -1,48 +1,64 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>User Detail - Bot Admin</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-    <nav class="navbar">
-        <div class="nav-brand">🤖 Bot Admin</div>
-        <div class="nav-links">
-            <a href="{{ url_for('dashboard') }}">Dashboard</a>
-            <a href="{{ url_for('users_list') }}">Users</a>
-            <a href="{{ url_for('codes_list') }}">Redeem Codes</a>
-            <a href="{{ url_for('logout') }}" class="btn-logout">Logout</a>
-        </div>
-    </nav>
+{% extends "base.html" %}
 
-    <main class="container">
+{% block title %}User {{ user.user_id }} - Bot Admin{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
         <h1>User Detail</h1>
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% for category, msg in messages %}
-                <div class="alert alert-{{ category }}">{{ msg }}</div>
-            {% endfor %}
-        {% endwith %}
-        <a href="{{ url_for('users_list') }}" class="btn btn-sm">← Back</a>
+        <p class="page-sub"><span class="mono">{{ user.user_id }}</span></p>
+    </div>
+    <a href="{{ url_for('users_list') }}" class="btn btn-ghost btn-sm">← Back to Users</a>
+</div>
 
+<div class="detail-grid">
+    <div>
         <div class="detail-card">
-            <div class="detail-row"><span>ID</span><code>{{ user.user_id }}</code></div>
-            <div class="detail-row"><span>Name</span><strong>{{ user.first_name }}</strong></div>
-            <div class="detail-row"><span>Username</span><strong>@{{ user.username or '-' }}</strong></div>
-            <div class="detail-row"><span>Status</span>
-                {% if user.is_approved %}
-                    <span class="badge badge-success">Approved</span>
-                {% else %}
-                    <span class="badge badge-danger">Pending</span>
-                {% endif %}
+            <div class="detail-row">
+                <span class="d-label">Status</span>
+                <span class="d-value">
+                    {% if user.is_approved %}
+                        <span class="badge badge-success">Approved</span>
+                    {% else %}
+                        <span class="badge badge-danger">Pending</span>
+                    {% endif %}
+                </span>
             </div>
-            <div class="detail-row"><span>Credits</span><code>{{ user.credits }}</code></div>
-            <div class="detail-row"><span>Referral Code</span><code>{{ user.referral_code }}</code></div>
-            <div class="detail-row"><span>Referred By</span><code>{{ user.referred_by or 'None' }}</code></div>
-            <div class="detail-row"><span>Referrals</span><code>{{ user.referrals_count }}</code></div>
-            <div class="detail-row"><span>Total Lookups</span><code>{{ user.total_lookups }}</code></div>
-            <div class="detail-row"><span>Created</span><code>{{ user.created_at.strftime('%Y-%m-%d %H:%M UTC') if user.created_at else '-' }}</code></div>
+            <div class="detail-row">
+                <span class="d-label">Name</span>
+                <span class="d-value">{{ user.first_name }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="d-label">Username</span>
+                <span class="d-value">@{{ user.username or '-' }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="d-label">Credits</span>
+                <span class="d-value"><span class="mono">{{ user.credits }}</span></span>
+            </div>
+            <div class="detail-row">
+                <span class="d-label">Referral Code</span>
+                <span class="d-value">
+                    <span class="mono">{{ user.referral_code }}</span>
+                    <button class="copy-btn" data-copy="{{ user.referral_code }}">Copy</button>
+                </span>
+            </div>
+            <div class="detail-row">
+                <span class="d-label">Referred By</span>
+                <span class="d-value"><span class="mono">{{ user.referred_by or 'None' }}</span></span>
+            </div>
+            <div class="detail-row">
+                <span class="d-label">Referrals</span>
+                <span class="d-value"><span class="mono">{{ user.referrals_count }}</span></span>
+            </div>
+            <div class="detail-row">
+                <span class="d-label">Total Lookups</span>
+                <span class="d-value"><span class="mono">{{ user.total_lookups }}</span></span>
+            </div>
+            <div class="detail-row">
+                <span class="d-label">Joined</span>
+                <span class="d-value">{{ user.created_at.strftime('%Y-%m-%d %H:%M UTC') if user.created_at else '-' }}</span>
+            </div>
         </div>
 
         <div class="actions">
@@ -61,9 +77,31 @@
 
             <form method="post" action="{{ url_for('delete_user', user_id=user.user_id) }}"
                   onsubmit="return confirm('Delete this user permanently?');" class="inline-form">
-                <button type="submit" class="btn btn-danger">🗑️ Delete User</button>
+                <button type="submit" class="btn btn-danger">🗑️ Delete</button>
             </form>
         </div>
-    </main>
-</body>
-</html>
+    </div>
+
+    <div class="detail-card">
+        <h2 style="font-size:17px; padding:16px 0;">Redeemed Codes ({{ redeemed_codes|length }})</h2>
+        {% if redeemed_codes %}
+            {% for c in redeemed_codes %}
+            <div class="detail-row">
+                <span class="d-label"><span class="mono">{{ c.code }}</span></span>
+                <span class="d-value">
+                    <span class="mono">{{ c.credits }}</span> credits
+                    {% if c.used_at %}
+                        <span class="page-sub"> · {{ c.used_at.strftime('%Y-%m-%d') }}</span>
+                    {% endif %}
+                </span>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="empty-state" style="padding:32px 0;">
+                <div class="empty-icon">🎟️</div>
+                <p>No codes redeemed yet.</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
