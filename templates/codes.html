@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redeem Codes - Bot Admin</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">🤖 Bot Admin</div>
+        <div class="nav-links">
+            <a href="{{ url_for('dashboard') }}">Dashboard</a>
+            <a href="{{ url_for('users_list') }}">Users</a>
+            <a href="{{ url_for('codes_list') }}" class="active">Redeem Codes</a>
+            <a href="{{ url_for('logout') }}" class="btn-logout">Logout</a>
+        </div>
+    </nav>
+
+    <main class="container">
+        <h1>Redeem Codes</h1>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, msg in messages %}
+                <div class="alert alert-{{ category }}">{{ msg }}</div>
+            {% endfor %}
+        {% endwith %}
+
+        <div class="detail-card">
+            <h2 style="margin-bottom: 12px;">Generate New Codes</h2>
+            <form method="post" action="{{ url_for('codes_generate') }}" class="inline-form credit-form">
+                <input type="number" name="credits" placeholder="Credits per code" min="1" required>
+                <input type="number" name="count" placeholder="Count" min="1" value="1" required>
+                <button type="submit" class="btn">🎟️ Generate</button>
+            </form>
+            <p class="login-sub" style="margin-top: 8px; margin-bottom: 0;">Users redeem codes with <code>/redeem &lt;CODE&gt;</code> in the bot.</p>
+        </div>
+
+        <div class="table-wrap" style="margin-top: 24px;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Code</th>
+                        <th>Credits</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Redeemed By</th>
+                        <th>Redeemed At</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for c in codes %}
+                    <tr>
+                        <td><code>{{ c.code }}</code></td>
+                        <td>{{ c.credits }}</td>
+                        <td>
+                            {% if c.used_by %}
+                                <span class="badge badge-danger">Used</span>
+                            {% else %}
+                                <span class="badge badge-success">Available</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ c.created_at.strftime('%Y-%m-%d %H:%M UTC') if c.created_at else '-' }}</td>
+                        <td>
+                            {% if c.used_by %}
+                                <a href="{{ url_for('user_detail', user_id=c.used_by) }}">{{ c.used_by }}</a>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td>{{ c.used_at.strftime('%Y-%m-%d %H:%M UTC') if c.used_at else '-' }}</td>
+                        <td>
+                            <form method="post" action="{{ url_for('codes_delete', code=c.code) }}"
+                                  onsubmit="return confirm('Delete this code?');" class="inline-form">
+                                <button type="submit" class="btn btn-danger btn-sm">🗑️ Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </main>
+</body>
+</html>

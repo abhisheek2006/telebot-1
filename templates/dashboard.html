@@ -12,6 +12,7 @@
         <div class="nav-links">
             <a href="{{ url_for('dashboard') }}" class="active">Dashboard</a>
             <a href="{{ url_for('users_list') }}">Users</a>
+            <a href="{{ url_for('codes_list') }}">Redeem Codes</a>
             <a href="{{ url_for('logout') }}" class="btn-logout">Logout</a>
         </div>
     </nav>
@@ -48,9 +49,18 @@
                 <div class="stat-value">{{ stats.total_referrals }}</div>
                 <div class="stat-label">🤝 Referrals</div>
             </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ stats.redeems }}</div>
+                <div class="stat-label">🎟️ Codes Redeemed</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ stats.codes_generated }}</div>
+                <div class="stat-label">✨ Codes Generated</div>
+            </div>
         </div>
         <div class="actions">
             <a href="{{ url_for('users_list') }}" class="btn">View All Users</a>
+            <a href="{{ url_for('codes_list') }}" class="btn btn-success">Generate Redeem Codes</a>
         </div>
     </main>
 </body>

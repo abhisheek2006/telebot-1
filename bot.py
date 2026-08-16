@@ -1,6 +1,7 @@
 import os
 import logging
 import random
+import re
 import string
 import requests
 from datetime import datetime, timezone
@@ -38,6 +39,7 @@ mongo_client = MongoClient(MONGO_URI)
 db = mongo_client.telegram_bot
 users_col = db.users
 stats_col = db.stats
+codes_col = db.redeem_codes
 logging.info("MongoDB connected: %s", db.name)
 
 CREDIT_PER_LOOKUP = int(os.environ.get("CREDIT_PER_LOOKUP", "1"))
@@ -45,6 +47,10 @@ DEFAULT_NEW_USER_CREDITS = int(os.environ.get("DEFAULT_NEW_USER_CREDITS", "5"))
 REFERRAL_WELCOME_CREDITS = int(os.environ.get("REFERRAL_WELCOME_CREDITS", "3"))
 REFERRAL_THRESHOLD = int(os.environ.get("REFERRAL_THRESHOLD", "5"))
 REFERRAL_BONUS_CREDITS = int(os.environ.get("REFERRAL_BONUS_CREDITS", "10"))
+DEFAULT_REDEEM_CREDITS = int(os.environ.get("DEFAULT_REDEEM_CREDITS", "5"))
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "")
+ADMIN_CONTACT = os.environ.get("ADMIN_CONTACT", f"@{ADMIN_USERNAME}" if ADMIN_USERNAME else "the admin")
+ADMIN_NAME = os.environ.get("ADMIN_NAME", "Admin")
 
 pending_input = {}
 
@@ -218,6 +224,56 @@ def get_bot_username() -> str:
         return bot_me.username
     except Exception:
         return os.environ.get("BOT_USERNAME", "yourbot")
+
+
+def generate_redeem_code(length: int = 10) -> str:
+    chars = string.ascii_uppercase + string.digits
+    while True:
+        code = ''.join(random.choices(chars, k=length))
+        if not codes_col.find_one({"code": code}):
+            return code
+
+
+def create_redeem_codes(amount_credits: int, count: int = 1, created_by: int = None, custom_code: str = None) -> list:
+    created = []
+    codes_to_insert = []
+    for _ in range(count):
+        if custom_code:
+            if codes_col.find_one({"code": custom_code}):
+                return []
+            code = custom_code
+        else:
+            code = generate_redeem_code()
+        doc = {
+            "code": code,
+            "credits": amount_credits,
+            "created_by": created_by,
+            "created_at": datetime.now(timezone.utc),
+            "used_by": None,
+            "used_at": None,
+        }
+        codes_to_insert.append(doc)
+        created.append(code)
+    if codes_to_insert:
+        codes_col.insert_many(codes_to_insert)
+    return created
+
+
+def redeem_code(user_id: int, code: str) -> dict:
+    code = code.strip().upper()
+    doc = codes_col.find_one({"code": code})
+    if not doc:
+        return {"ok": False, "msg": "❌ Invalid redeem code."}
+    if doc.get("used_by"):
+        return {"ok": False, "msg": "❌ This code has already been redeemed."}
+    credits = doc.get("credits", 0)
+    codes_col.update_one(
+        {"code": code},
+        {"$set": {"used_by": user_id, "used_at": datetime.now(timezone.utc)}},
+    )
+    add_credits(user_id, credits)
+    bump_stat("redeems")
+    return {"ok": True, "msg": f"✅ Redeemed! You received {credits} credit(s).", "credits": credits}
 
 
 # ─────────────────────────────── Keyboards ───────────────────────────────
@@ -404,6 +460,12 @@ def handle_message(client: Client, message: types.Message):
             _cmd_revoke(message)
         elif cmd == "broadcast":
             _cmd_broadcast(message)
+        elif cmd == "redeem":
+            _cmd_redeem(message)
+        elif cmd == "gencode":
+            _cmd_gencode(message)
+        elif cmd == "admininfo":
+            _cmd_admininfo(message)
         else:
             message.reply_text("❓ Unknown command. Use /help or /start.",
                                reply_markup=main_menu_kb())
@@ -748,6 +810,143 @@ def _cmd_broadcast(message: types.Message):
     )
 
 
+def _cmd_redeem(message: types.Message):
+    if not is_approved(message.from_user.id):
+        message.reply_text("⛔ You are not authorized.", reply_markup=buy_credit_kb())
+        return
+    parts = message.text.split()
+    if len(parts) < 2:
+        message.reply_text(
+            "🎟️ <b>Redeem Code</b>\n\n"
+            "Usage: <code>/redeem &lt;CODE&gt;</code>\n\n"
+            "Enter the redeem code you received from the admin.",
+            reply_markup=main_menu_kb(),
+        )
+        return
+    code = parts[1]
+    result = redeem_code(message.from_user.id, code)
+    doc = get_user(message.from_user.id)
+    if result["ok"]:
+        message.reply_text(
+            f"{result['msg']}\n"
+            f"💰 New balance: <code>{doc.get('credits', 0)}</code> credits.",
+            reply_markup=main_menu_kb(),
+        )
+    else:
+        message.reply_text(result["msg"], reply_markup=main_menu_kb())
+
+
+def _cmd_admininfo(message: types.Message):
+    admin_id = int(ADMIN_ID) if ADMIN_ID else None
+    username = ADMIN_USERNAME or (f"@{ADMIN_CONTACT}" if not ADMIN_CONTACT.startswith("@") else ADMIN_CONTACT)
+    name = ADMIN_NAME
+
+    status = "unknown"
+    if admin_id:
+        try:
+            admin_user = app.get_users(admin_id)
+            us = getattr(admin_user, "status", None)
+            if us == enums.UserStatus.ONLINE:
+                status = "🟢 Online"
+            elif us == enums.UserStatus.RECENTLY:
+                status = "🟢 Recently Online"
+            elif us == enums.UserStatus.LAST_WEEK:
+                status = "🟡 Last Seen This Week"
+            elif us == enums.UserStatus.LAST_MONTH:
+                status = "🟠 Last Seen This Month"
+            elif us == enums.UserStatus.OFFLINE:
+                status = "🔴 Offline"
+            elif us == enums.UserStatus.LONG_AGO:
+                status = "🔴 Last Seen Long Ago"
+            else:
+                status = "🟡 Unknown"
+            if not username and getattr(admin_user, "username", None):
+                username = admin_user.username
+            if name == "Admin" and getattr(admin_user, "first_name", None):
+                name = admin_user.first_name
+        except Exception:
+            status = "🟡 Unknown"
+
+    contact_line = ADMIN_CONTACT if ADMIN_CONTACT.startswith("@") else f"@{ADMIN_CONTACT}"
+    text = (
+        f"👑 <b>Admin Info</b>\n\n"
+        f"👤 <b>Name:</b> {name}\n"
+        f"📛 <b>Username:</b> @{username.lstrip('@')}\n"
+        f"🕐 <b>Status:</b> {status}\n"
+        f"📩 <b>Contact:</b> {contact_line}\n\n"
+        f"💬 Message the admin to buy credits, request access, or get help."
+    )
+    kb = admin_kb() if str(message.from_user.id) == str(ADMIN_ID) else main_menu_kb()
+    message.reply_text(text, reply_markup=kb)
+
+
+def _cmd_gencode(message: types.Message):
+    if str(message.from_user.id) != str(ADMIN_ID):
+        message.reply_text("⛔ Admin only.")
+        return
+    parts = message.text.split()
+    if len(parts) < 2:
+        message.reply_text(
+            "🎟️ <b>Generate Redeem Code</b>\n\n"
+            "Usage:\n"
+            "<code>/gencode &lt;custom_code&gt; [amount]</code>\n"
+            "<code>/gencode &lt;credits&gt; [count]</code>\n\n"
+            "Examples:\n"
+            "<code>/gencode MYCODE</code> — custom code, default credits\n"
+            "<code>/gencode MYCODE 10</code> — custom code worth 10 credits\n"
+            "<code>/gencode 10</code> — auto code worth 10 credits\n"
+            "<code>/gencode 5 10</code> — ten auto codes worth 5 credits each",
+            reply_markup=admin_kb(),
+        )
+        return
+
+    first = parts[1]
+    if first.isdigit():
+        credits = int(first)
+        count = 1
+        if len(parts) >= 3:
+            try:
+                count = max(1, min(int(parts[2]), 100))
+            except ValueError:
+                message.reply_text("❌ Count must be a number.", reply_markup=admin_kb())
+                return
+        codes = create_redeem_codes(credits, count, message.from_user.id)
+    else:
+        custom_code = first.upper()
+        if not re.match(r'^[A-Z0-9_-]{3,20}$', custom_code):
+            message.reply_text(
+                "❌ Invalid code. Use 3-20 chars of A-Z, 0-9, - or _.",
+                reply_markup=admin_kb(),
+            )
+            return
+        credits = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else DEFAULT_REDEEM_CREDITS
+        count = 1
+        codes = create_redeem_codes(credits, count, message.from_user.id, custom_code=custom_code)
+        if not codes:
+            message.reply_text(
+                f"❌ Code <code>{custom_code}</code> already exists.",
+                reply_markup=admin_kb(),
+            )
+            return
+
+    bump_stat("codes_generated", count)
+    text = (
+        f"🎟️ <b>Redeem Codes Generated</b>\n\n"
+        f"💳 Credits each: <code>{credits}</code>\n"
+        f"🔢 Count: <code>{len(codes)}</code>\n\n"
+        f"<code>{codes[0]}</code>"
+    )
+    if len(codes) > 1:
+        code_lines = "\n".join(f"<code>{c}</code>" for c in codes)
+        text = (
+            f"🎟️ <b>Redeem Codes Generated</b>\n\n"
+            f"💳 Credits each: <code>{credits}</code>\n"
+            f"🔢 Count: <code>{len(codes)}</code>\n\n"
+            f"{code_lines}"
+        )
+    message.reply_text(text, reply_markup=admin_kb())
+
+
 def broadcast_to_all(text: str) -> dict:
     users = list(users_col.find({}))
     sent = 0
@@ -765,6 +964,21 @@ def broadcast_to_all(text: str) -> dict:
             if "bot was blocked" in str(e).lower() or "chat not found" in str(e).lower():
                 blocked += 1
     return {"total": len(users), "sent": sent, "failed": failed, "blocked": blocked}
+
+
+def format_broadcast_text(text: str) -> str:
+    def link_repl(m):
+        label = m.group(1)
+        url = m.group(2)
+        if not url.startswith(("http://", "https://", "tg://")):
+            url = "https://" + url
+        return f'<a href="{url}">{label}</a>'
+
+    text = re.sub(r'\[([^\]]+)\]\((https?://[^\s)]+)\)', link_repl, text)
+    text = re.sub(r'\[([^\]]+)\]\(([^\s)]+)\)', link_repl, text)
+    text = re.sub(r'\[([^\]]+)\]', r'<b>\1</b>', text)
+    text = re.sub(r'_([^_]+)_', r'<code>\1</code>', text)
+    return text
 
 
 def _cmd_admin_list(message: types.Message):
@@ -852,7 +1066,7 @@ def _handle_text_input(message: types.Message):
         status_msg = message.reply_text(
             f"📣 Broadcasting to all users...\nThis may take a while.",
         )
-        result = broadcast_to_all(raw)
+        result = broadcast_to_all(format_broadcast_text(raw))
         bump_stat("broadcasts")
         text = (
             f"✅ <b>Broadcast complete</b>\n\n"

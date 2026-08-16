@@ -1,6 +1,8 @@
 import os
 import functools
-from datetime import datetime
+import random
+import string
+from datetime import datetime, timezone
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from pymongo import MongoClient
 from dotenv import load_dotenv
@@ -27,6 +29,32 @@ mongo_client = MongoClient(MONGO_URI)
 db = mongo_client.telegram_bot
 users_col = db.users
 stats_col = db.stats
+codes_col = db.redeem_codes
+
+
+def generate_redeem_code(length: int = 10) -> str:
+    chars = string.ascii_uppercase + string.digits
+    while True:
+        code = ''.join(random.choices(chars, k=length))
+        if not codes_col.find_one({"code": code}):
+            return code
+
+
+def create_redeem_codes(amount_credits: int, count: int = 1, created_by: int = None) -> list:
+    created = []
+    for _ in range(count):
+        code = generate_redeem_code()
+        doc = {
+            "code": code,
+            "credits": amount_credits,
+            "created_by": created_by,
+            "created_at": datetime.now(timezone.utc),
+            "used_by": None,
+            "used_at": None,
+        }
+        codes_col.insert_one(doc)
+        created.append(code)
+    return created
 
 
 def login_required(view):
@@ -83,6 +111,8 @@ def dashboard():
         "total_lookups": total_lookups,
         "total_referrals": total_referrals,
         "referral_bonuses": stats.get("referral_bonuses", 0),
+        "redeems": stats.get("redeems", 0),
+        "codes_generated": stats.get("codes_generated", 0),
     }
     return render_template("dashboard.html", stats=card_stats)
 
@@ -144,6 +174,43 @@ def delete_user(user_id):
     else:
         flash("User not found.", "danger")
     return redirect(url_for("users_list"))
+
+
+@app.route("/codes")
+@login_required
+def codes_list():
+    codes = list(codes_col.find({}).sort("created_at", -1))
+    return render_template("codes.html", codes=codes)
+
+
+@app.route("/codes/generate", methods=["POST"])
+@login_required
+def codes_generate():
+    try:
+        credits = int(request.form.get("credits", 0))
+        count = int(request.form.get("count", 1))
+    except ValueError:
+        credits = 0
+        count = 1
+    if credits <= 0:
+        flash("Credits must be a positive number.", "danger")
+        return redirect(url_for("codes_list"))
+    count = max(1, min(count, 100))
+    codes = create_redeem_codes(credits, count)
+    stats_col.update_one({"_id": "bot"}, {"$inc": {"codes_generated": count}}, upsert=True)
+    flash(f"Generated {len(codes)} redeem code(s) worth {credits} credits each.", "success")
+    return redirect(url_for("codes_list"))
+
+
+@app.route("/codes/delete/<code>", methods=["POST"])
+@login_required
+def codes_delete(code):
+    result = codes_col.delete_one({"code": code})
+    if result.deleted_count:
+        flash(f"Code {code} deleted.", "success")
+    else:
+        flash("Code not found.", "danger")
+    return redirect(url_for("codes_list"))
 
 
 if __name__ == "__main__":
