@@ -402,6 +402,8 @@ def handle_message(client: Client, message: types.Message):
             _cmd_approve(message)
         elif cmd == "revoke":
             _cmd_revoke(message)
+        elif cmd == "broadcast":
+            _cmd_broadcast(message)
         else:
             message.reply_text("❓ Unknown command. Use /help or /start.",
                                reply_markup=main_menu_kb())
@@ -733,6 +735,38 @@ def _cmd_revoke(message: types.Message):
         message.reply_text(f"ℹ️ User {target} was not approved.")
 
 
+def _cmd_broadcast(message: types.Message):
+    if str(message.from_user.id) != str(ADMIN_ID):
+        message.reply_text("⛔ Admin only.")
+        return
+    pending_input[message.from_user.id] = "awaiting_broadcast_text"
+    message.reply_text(
+        "📣 <b>Broadcast</b>\n\n"
+        "Send the message you want to broadcast to all users.\n"
+        "You can include HTML formatting.\n\n"
+        "Reply with <code>cancel</code> to abort.",
+    )
+
+
+def broadcast_to_all(text: str) -> dict:
+    users = list(users_col.find({}))
+    sent = 0
+    failed = 0
+    blocked = 0
+    for u in users:
+        uid = u.get("user_id")
+        if not uid:
+            continue
+        try:
+            app.send_message(uid, text)
+            sent += 1
+        except Exception as e:
+            failed += 1
+            if "bot was blocked" in str(e).lower() or "chat not found" in str(e).lower():
+                blocked += 1
+    return {"total": len(users), "sent": sent, "failed": failed, "blocked": blocked}
+
+
 def _cmd_admin_list(message: types.Message):
     if str(message.from_user.id) != str(ADMIN_ID):
         message.reply_text("⛔ Admin only.")
@@ -802,6 +836,36 @@ def _ask_lookup(message: types.Message):
 def _handle_text_input(message: types.Message):
     uid = message.from_user.id
     state = pending_input.get(uid)
+
+    if state == "awaiting_broadcast_text":
+        if str(uid) != str(ADMIN_ID):
+            pending_input[uid] = None
+            return
+        pending_input[uid] = None
+        raw = message.text.strip()
+        if raw.lower() == "cancel":
+            message.reply_text("❌ Broadcast cancelled.", reply_markup=admin_kb())
+            return
+        if len(raw) < 1:
+            message.reply_text("❌ Message cannot be empty.")
+            return
+        status_msg = message.reply_text(
+            f"📣 Broadcasting to all users...\nThis may take a while.",
+        )
+        result = broadcast_to_all(raw)
+        bump_stat("broadcasts")
+        text = (
+            f"✅ <b>Broadcast complete</b>\n\n"
+            f"👥 Total users: <code>{result['total']}</code>\n"
+            f"📨 Sent: <code>{result['sent']}</code>\n"
+            f"❌ Failed: <code>{result['failed']}</code>\n"
+            f"🚫 Blocked bot: <code>{result['blocked']}</code>"
+        )
+        try:
+            status_msg.edit_text(text, reply_markup=admin_kb())
+        except Exception:
+            message.reply_text(text, reply_markup=admin_kb())
+        return
 
     if state == "awaiting_credit_user":
         raw = message.text.strip()
