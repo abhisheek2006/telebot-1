@@ -12,15 +12,19 @@
 
 <div class="card form-card" style="margin-bottom:24px;">
     <h2>🎟️ Generate New Codes</h2>
-    <p class="form-sub">Each code gives the redeemer the selected number of credits.</p>
+    <p class="form-sub">Each code gives each redeemer the selected number of credits, up to the redeem limit.</p>
     <form method="post" action="{{ url_for('codes_generate') }}" class="flex-row">
-        <div class="field" style="flex:1; min-width:150px; margin:0;">
+        <div class="field" style="flex:1; min-width:140px; margin:0;">
             <label for="credits">Credits per code</label>
             <input class="input" type="number" id="credits" name="credits" min="1" required>
         </div>
-        <div class="field" style="flex:1; min-width:120px; margin:0;">
+        <div class="field" style="flex:1; min-width:110px; margin:0;">
             <label for="count">How many</label>
             <input class="input" type="number" id="count" name="count" min="1" value="1" required>
+        </div>
+        <div class="field" style="flex:1; min-width:140px; margin:0;">
+            <label for="max_redeems">People per code</label>
+            <input class="input" type="number" id="max_redeems" name="max_redeems" min="1" value="1" required>
         </div>
         <div style="display:flex; align-items:flex-end;">
             <button type="submit" class="btn">Generate</button>
@@ -35,37 +39,33 @@
             <tr>
                 <th>Code</th>
                 <th>Credits</th>
+                <th>Redeems</th>
                 <th>Status</th>
                 <th>Created</th>
-                <th>Redeemed By</th>
-                <th>Redeemed At</th>
                 <th>Actions</th>
             </tr>
         </thead>
         <tbody>
             {% for c in codes %}
+            {% set redeemed_count = c.redeemed_by|length if c.redeemed_by else 0 %}
+            {% set max_redeems = c.max_redeems or 1 %}
             <tr>
                 <td data-label="Code">
                     <span class="mono">{{ c.code }}</span>
                     <button class="copy-btn" data-copy="{{ c.code }}">Copy</button>
                 </td>
                 <td data-label="Credits"><span class="mono">{{ c.credits }}</span></td>
+                <td data-label="Redeems"><span class="mono">{{ redeemed_count }}/{{ max_redeems }}</span></td>
                 <td data-label="Status">
-                    {% if c.used_by %}
+                    {% if redeemed_count >= max_redeems %}
                         <span class="badge badge-danger">Used</span>
+                    {% elif redeemed_count > 0 %}
+                        <span class="badge badge-warning">Partial</span>
                     {% else %}
                         <span class="badge badge-success">Available</span>
                     {% endif %}
                 </td>
                 <td data-label="Created">{{ c.created_at.strftime('%Y-%m-%d %H:%M') if c.created_at else '-' }}</td>
-                <td data-label="Redeemed By">
-                    {% if c.used_by %}
-                        <a href="{{ url_for('user_detail', user_id=c.used_by) }}" class="accent-link"><span class="mono">{{ c.used_by }}</span></a>
-                    {% else %}
-                        -
-                    {% endif %}
-                </td>
-                <td data-label="Redeemed At">{{ c.used_at.strftime('%Y-%m-%d %H:%M') if c.used_at else '-' }}</td>
                 <td data-label="Actions">
                     <form method="post" action="{{ url_for('codes_delete', code=c.code) }}"
                           onsubmit="return confirm('Delete this code?');" class="inline-form">

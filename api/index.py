@@ -44,7 +44,7 @@ def generate_redeem_code(length: int = 10) -> str:
             return code
 
 
-def create_redeem_codes(amount_credits: int, count: int = 1, created_by: int = None) -> list:
+def create_redeem_codes(amount_credits: int, count: int = 1, created_by: int = None, max_redeems: int = 1) -> list:
     created = []
     for _ in range(count):
         code = generate_redeem_code()
@@ -55,6 +55,8 @@ def create_redeem_codes(amount_credits: int, count: int = 1, created_by: int = N
             "created_at": datetime.now(timezone.utc),
             "used_by": None,
             "used_at": None,
+            "max_redeems": max_redeems,
+            "redeemed_by": [],
         }
         codes_col.insert_one(doc)
         created.append(code)
@@ -249,16 +251,19 @@ def codes_generate():
     try:
         credits = int(request.form.get("credits", 0))
         count = int(request.form.get("count", 1))
+        max_redeems = int(request.form.get("max_redeems", 1))
     except ValueError:
         credits = 0
         count = 1
+        max_redeems = 1
     if credits <= 0:
         flash("Credits must be a positive number.", "danger")
         return redirect(url_for("codes_list"))
     count = max(1, min(count, 100))
-    codes = create_redeem_codes(credits, count)
+    max_redeems = max(1, min(max_redeems, 1000))
+    codes = create_redeem_codes(credits, count, max_redeems=max_redeems)
     stats_col.update_one({"_id": "bot"}, {"$inc": {"codes_generated": count}}, upsert=True)
-    flash(f"Generated {len(codes)} redeem code(s) worth {credits} credits each.", "success")
+    flash(f"Generated {len(codes)} redeem code(s) worth {credits} credits each, redeemable by up to {max_redeems} person(s).", "success")
     return redirect(url_for("codes_list"))
 
 

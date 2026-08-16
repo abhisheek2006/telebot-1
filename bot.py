@@ -235,7 +235,7 @@ def generate_redeem_code(length: int = 10) -> str:
             return code
 
 
-def create_redeem_codes(amount_credits: int, count: int = 1, created_by: int = None, custom_code: str = None) -> list:
+def create_redeem_codes(amount_credits: int, count: int = 1, created_by: int = None, custom_code: str = None, max_redeems: int = 1) -> list:
     created = []
     codes_to_insert = []
     for _ in range(count):
@@ -252,6 +252,8 @@ def create_redeem_codes(amount_credits: int, count: int = 1, created_by: int = N
             "created_at": datetime.now(timezone.utc),
             "used_by": None,
             "used_at": None,
+            "max_redeems": max_redeems,
+            "redeemed_by": [],
         }
         codes_to_insert.append(doc)
         created.append(code)
@@ -265,12 +267,17 @@ def redeem_code(user_id: int, code: str) -> dict:
     doc = codes_col.find_one({"code": code})
     if not doc:
         return {"ok": False, "msg": "❌ Invalid redeem code."}
-    if doc.get("used_by"):
-        return {"ok": False, "msg": "❌ This code has already been redeemed."}
+    redeemed_by = doc.get("redeemed_by", []) or []
+    max_redeems = doc.get("max_redeems", 1)
+    if user_id in redeemed_by:
+        return {"ok": False, "msg": "❌ You have already redeemed this code."}
+    if len(redeemed_by) >= max_redeems:
+        return {"ok": False, "msg": "❌ This code has reached its redeem limit."}
     credits = doc.get("credits", 0)
+    redeemed_by.append(user_id)
     codes_col.update_one(
         {"code": code},
-        {"$set": {"used_by": user_id, "used_at": datetime.now(timezone.utc)}},
+        {"$set": {"used_by": user_id, "used_at": datetime.now(timezone.utc), "redeemed_by": redeemed_by}},
     )
     add_credits(user_id, credits)
     bump_stat("redeems")
@@ -914,28 +921,30 @@ def _cmd_gencode(message: types.Message):
         message.reply_text(
             "🎟️ <b>Generate Redeem Code</b>\n\n"
             "Usage:\n"
-            "<code>/gencode &lt;custom_code&gt; [amount]</code>\n"
-            "<code>/gencode &lt;credits&gt; [count]</code>\n\n"
+            "<code>/gencode &lt;custom_code&gt; [amount] [max_people]</code>\n"
+            "<code>/gencode &lt;credits&gt; [count] [max_people]</code>\n\n"
             "Examples:\n"
-            "<code>/gencode MYCODE</code> — custom code, default credits\n"
+            "<code>/gencode MYCODE</code> — custom code, default credits, 1 user\n"
             "<code>/gencode MYCODE 10</code> — custom code worth 10 credits\n"
+            "<code>/gencode MYCODE 10 5</code> — 10 credits, up to 5 people can redeem\n"
             "<code>/gencode 10</code> — auto code worth 10 credits\n"
-            "<code>/gencode 5 10</code> — ten auto codes worth 5 credits each",
+            "<code>/gencode 5 10</code> — ten auto codes worth 5 credits each\n"
+            "<code>/gencode 5 10 3</code> — ten codes, each redeemable by 3 people",
             reply_markup=admin_kb(),
         )
         return
 
     first = parts[1]
+    max_redeems = 1
+    if len(parts) >= 4 and parts[-1].isdigit():
+        max_redeems = max(1, min(int(parts[-1]), 1000))
+
     if first.isdigit():
         credits = int(first)
         count = 1
-        if len(parts) >= 3:
-            try:
-                count = max(1, min(int(parts[2]), 100))
-            except ValueError:
-                message.reply_text("❌ Count must be a number.", reply_markup=admin_kb())
-                return
-        codes = create_redeem_codes(credits, count, message.from_user.id)
+        if len(parts) >= 3 and parts[2].isdigit():
+            count = max(1, min(int(parts[2]), 100))
+        codes = create_redeem_codes(credits, count, message.from_user.id, max_redeems=max_redeems)
     else:
         custom_code = first.upper()
         if not re.match(r'^[A-Z0-9_-]{3,20}$', custom_code):
@@ -944,9 +953,11 @@ def _cmd_gencode(message: types.Message):
                 reply_markup=admin_kb(),
             )
             return
-        credits = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else DEFAULT_REDEEM_CREDITS
+        credits = DEFAULT_REDEEM_CREDITS
+        if len(parts) >= 3 and parts[2].isdigit():
+            credits = int(parts[2])
         count = 1
-        codes = create_redeem_codes(credits, count, message.from_user.id, custom_code=custom_code)
+        codes = create_redeem_codes(credits, count, message.from_user.id, custom_code=custom_code, max_redeems=max_redeems)
         if not codes:
             message.reply_text(
                 f"❌ Code <code>{custom_code}</code> already exists.",
@@ -955,19 +966,22 @@ def _cmd_gencode(message: types.Message):
             return
 
     bump_stat("codes_generated", count)
+    people_line = f"👥 Redeem limit: <code>{max_redeems}</code> person(s)\n"
     text = (
         f"🎟️ <b>Redeem Codes Generated</b>\n\n"
         f"💳 Credits each: <code>{credits}</code>\n"
-        f"🔢 Count: <code>{len(codes)}</code>\n\n"
-        f"<code>{codes[0]}</code>"
+        f"🔢 Count: <code>{len(codes)}</code>\n"
+        f"{people_line}"
+        f"\n<code>{codes[0]}</code>"
     )
     if len(codes) > 1:
         code_lines = "\n".join(f"<code>{c}</code>" for c in codes)
         text = (
             f"🎟️ <b>Redeem Codes Generated</b>\n\n"
             f"💳 Credits each: <code>{credits}</code>\n"
-            f"🔢 Count: <code>{len(codes)}</code>\n\n"
-            f"{code_lines}"
+            f"🔢 Count: <code>{len(codes)}</code>\n"
+            f"{people_line}"
+            f"\n{code_lines}"
         )
     message.reply_text(text, reply_markup=admin_kb())
 
@@ -1186,7 +1200,7 @@ def _handle_text_input(message: types.Message):
 def extract_lookup_records(data):
     result_data = data.get("result", {})
     inner_result = result_data.get("result", {})
-    records = inner_result.get("result", []) if isinstance(inner_result.get("result"), list) else [inner_result.get("result", {})]
+    records = inner_result.get("results", []) if isinstance(inner_result.get("results"), list) else [inner_result.get("result", {})]
     if not records:
         records = [{}]
     return records
@@ -1250,7 +1264,7 @@ def format_api_response(data, phone_number):
 
     result_data = data.get("result", {})
     inner_result = result_data.get("result", {})
-    records = inner_result.get("result", []) if isinstance(inner_result.get("result"), list) else [inner_result.get("result", {})]
+    records = inner_result.get("results", []) if isinstance(inner_result.get("results"), list) else [inner_result.get("result", {})]
 
     if not records:
         records = [{}]
@@ -1260,11 +1274,11 @@ def format_api_response(data, phone_number):
     for record in records:
         if record:
             response_text += (
-                f"📱 <b>Mobile:</b> <code>{record.get('num', 'N/A')}</code>\n"
+                f"📱 <b>Mobile:</b> <code>{record.get('mobile', record.get('num', 'N/A'))}</code>\n"
                 f"👤 <b>Name:</b> {record.get('name', 'N/A')}\n"
                 f"👨‍👦 <b>Father:</b> {record.get('fname', 'N/A')}\n"
                 f"🏠 <b>Address:</b> {record.get('address', 'N/A')}\n"
-                f"🆔 <b>Adhaar:</b> <code>{record.get('aadhar', 'N/A')}</code>\n"
+                f"🆔 <b>ID:</b> <code>{record.get('id', 'N/A')}</code>\n"
                 f"📍 <b>Circle:</b> {record.get('circle', 'N/A')}\n"
                 f"📞 <b>Alternate:</b> {record.get('alt', 'N/A')}\n"
                 f"📧 <b>Email:</b> {record.get('email') or 'N/A'}\n"
