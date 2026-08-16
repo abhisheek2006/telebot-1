@@ -33,6 +33,7 @@ users_col = db.users
 stats_col = db.stats
 codes_col = db.redeem_codes
 settings_col = db.admin_settings
+lookups_col = db.lookups
 
 
 def generate_redeem_code(length: int = 10) -> str:
@@ -144,6 +145,7 @@ def dashboard():
         "redeems": stats.get("redeems", 0),
         "codes_generated": stats.get("codes_generated", 0),
         "broadcasts": stats.get("broadcasts", 0),
+        "lookup_records": lookups_col.count_documents({}),
     }
     return render_template("dashboard.html", stats=card_stats)
 
@@ -269,6 +271,59 @@ def codes_delete(code):
     else:
         flash("Code not found.", "danger")
     return redirect(url_for("codes_list"))
+
+
+@app.route("/lookups")
+@login_required
+def lookups_list():
+    q = request.args.get("q", "").strip().lower()
+    query = {}
+    if q:
+        try:
+            q_int = int(q)
+            query = {"$or": [
+                {"number": {"$regex": q, "$options": "i"}},
+                {"records.name": {"$regex": q, "$options": "i"}},
+                {"user_id": q_int},
+            ]}
+        except ValueError:
+            query = {"$or": [
+                {"number": {"$regex": q, "$options": "i"}},
+                {"records.name": {"$regex": q, "$options": "i"}},
+            ]}
+    lookups = list(lookups_col.find(query).sort("searched_at", -1).limit(200))
+
+    user_names = {}
+    user_ids = {l.get("user_id") for l in lookups if l.get("user_id")}
+    for uid in user_ids:
+        doc = users_col.find_one({"user_id": uid}, {"first_name": 1, "username": 1})
+        if doc:
+            user_names[uid] = doc
+
+    for l in lookups:
+        l["_id"] = str(l.get("_id"))
+        record = None
+        if l.get("records"):
+            for r in l["records"]:
+                if isinstance(r, dict) and r.get("name"):
+                    record = r
+                    break
+        if not record and l.get("records"):
+            first = l["records"][0]
+            if isinstance(first, dict):
+                record = first
+        l["record"] = record or {}
+
+    return render_template("lookups.html", lookups=lookups, q=q, user_names=user_names)
+
+
+@app.route("/lookups/clear", methods=["POST"])
+@login_required
+def lookups_clear():
+    count = lookups_col.count_documents({})
+    lookups_col.delete_many({})
+    flash(f"Cleared {count} lookup record(s).", "success")
+    return redirect(url_for("lookups_list"))
 
 
 @app.route("/profile")

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Lookups - Bot Admin{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1>Lookup History <span style="color: var(--text-muted); font-size:18px;">({{ lookups|length }})</span></h1>
+        <p class="page-sub">Every phone number searched in the bot, with its result</p>
+    </div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+        <div class="search-bar">
+            <input class="input" type="search" id="lookup-search" placeholder="Search number or name..." value="{{ q }}">
+        </div>
+        <form method="post" action="{{ url_for('lookups_clear') }}"
+              onsubmit="return confirm('Delete all lookup history? This cannot be undone.');">
+            <button type="submit" class="btn btn-danger btn-sm">🗑️ Clear All</button>
+        </form>
+    </div>
+</div>
+
+{% if lookups %}
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Number</th>
+                <th>Name</th>
+                <th>Father</th>
+                <th>Address</th>
+                <th>Circle</th>
+                <th>Searched By</th>
+                <th>When</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for l in lookups %}
+            <tr data-search-row="{{ l.number }} {{ l.record.get('name', '') }} {{ l.record.get('fname', '') }} {{ l.record.get('address', '') }}">
+                <td data-label="Number"><span class="mono">{{ l.number }}</span></td>
+                <td data-label="Name"><strong>{{ l.record.get('name', '-') }}</strong></td>
+                <td data-label="Father">{{ l.record.get('fname', '-') }}</td>
+                <td data-label="Address">{{ l.record.get('address', '-') }}</td>
+                <td data-label="Circle">{{ l.record.get('circle', '-') }}</td>
+                <td data-label="Searched By">
+                    {% if l.user_id %}
+                        {% set u = user_names.get(l.user_id) %}
+                        <a href="{{ url_for('user_detail', user_id=l.user_id) }}" style="color: var(--accent-text);">
+                            <span class="mono">{{ l.user_id }}</span>
+                        </a>
+                        {% if u %} <span class="page-sub">· {{ u.get('first_name', '') }}</span>{% endif %}
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td data-label="When">{{ l.searched_at.strftime('%Y-%m-%d %H:%M') if l.searched_at else '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card empty-state">
+    <div class="empty-icon">🔍</div>
+    <h3>{{ 'No lookups match your search' if q else 'No lookups yet' }}</h3>
+    <p>{{ 'Try a different search term.' if q else 'Lookup data will appear here after users search numbers in the bot.' }}</p>
+</div>
+{% endif %}
+{% endblock %}

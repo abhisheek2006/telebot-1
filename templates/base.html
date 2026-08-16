@@ -17,6 +17,7 @@
                 <a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.endpoint == 'dashboard' }}">Dashboard</a>
                 <a href="{{ url_for('users_list') }}" class="{{ 'active' if request.endpoint == 'users_list' or request.endpoint == 'user_detail' }}">Users</a>
                 <a href="{{ url_for('codes_list') }}" class="{{ 'active' if request.endpoint == 'codes_list' }}">Redeem Codes</a>
+                <a href="{{ url_for('lookups_list') }}" class="{{ 'active' if request.endpoint == 'lookups_list' }}">Lookups</a>
                 <a href="{{ url_for('profile') }}" class="{{ 'active' if request.endpoint == 'profile' }}">Profile</a>
                 <a href="{{ url_for('logout') }}" class="btn-logout">Logout</a>
             </div>

@@ -40,6 +40,7 @@ db = mongo_client.telegram_bot
 users_col = db.users
 stats_col = db.stats
 codes_col = db.redeem_codes
+lookups_col = db.lookups
 logging.info("MongoDB connected: %s", db.name)
 
 CREDIT_PER_LOOKUP = int(os.environ.get("CREDIT_PER_LOOKUP", "1"))
@@ -298,6 +299,16 @@ def main_menu_kb() -> types.InlineKeyboardMarkup:
             ],
             [
                 types.InlineKeyboardButton(
+                    "🎟️ Redeem Code", callback_data="redeem",
+                    style=enums.ButtonStyle.PRIMARY,
+                ),
+                types.InlineKeyboardButton(
+                    "👑 Admin Info", callback_data="admininfo",
+                    style=enums.ButtonStyle.DEFAULT,
+                ),
+            ],
+            [
+                types.InlineKeyboardButton(
                     "❓ Help", callback_data="help",
                     style=enums.ButtonStyle.DEFAULT,
                 ),
@@ -324,6 +335,16 @@ def admin_kb(user_id: int = None) -> types.InlineKeyboardMarkup:
             types.InlineKeyboardButton(
                 "📊 Stats", callback_data="admin_stats",
                 style=enums.ButtonStyle.DEFAULT,
+            ),
+        ],
+        [
+            types.InlineKeyboardButton(
+                "🎟️ Gen Code", callback_data="admin_gencode",
+                style=enums.ButtonStyle.PRIMARY,
+            ),
+            types.InlineKeyboardButton(
+                "📣 Broadcast", callback_data="admin_broadcast",
+                style=enums.ButtonStyle.DANGER,
             ),
         ],
     ]
@@ -672,11 +693,15 @@ def _cmd_help(message: types.Message):
         "• Lookup Number — start a lookup\n"
         "• Check Balance — view your credit balance\n"
         "• Referral — invite friends for bonus credits\n"
+        "• Redeem Code — use /redeem to claim codes\n"
+        "• Admin Info — see admin status &amp; contact\n"
         "• Help — show this help\n\n"
         "👑 Admin:\n"
         "/admin — open admin panel\n"
         "/approve &lt;id&gt; — approve user\n"
-        "/revoke &lt;id&gt; — revoke user\n\n"
+        "/revoke &lt;id&gt; — revoke user\n"
+        "/gencode &lt;code&gt; [amount] — generate redeem codes\n"
+        "/broadcast — send a message to all users\n\n"
         "❓ Contact @Ankit_jii25 for issues."
     )
     message.reply_text(help_text, reply_markup=main_menu_kb())
@@ -1158,6 +1183,28 @@ def _handle_text_input(message: types.Message):
         return
 
 
+def extract_lookup_records(data):
+    result_data = data.get("result", {})
+    inner_result = result_data.get("result", {})
+    records = inner_result.get("result", []) if isinstance(inner_result.get("result"), list) else [inner_result.get("result", {})]
+    if not records:
+        records = [{}]
+    return records
+
+
+def save_lookup(uid: int, phone_number: str, data: dict):
+    records = extract_lookup_records(data)
+    try:
+        lookups_col.insert_one({
+            "user_id": uid,
+            "number": phone_number,
+            "records": records,
+            "searched_at": datetime.now(timezone.utc),
+        })
+    except Exception as e:
+        logging.warning("Could not save lookup: %s", e)
+
+
 def _do_lookup(message: types.Message, phone_number: str):
     uid = message.from_user.id
     app.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
@@ -1169,6 +1216,7 @@ def _do_lookup(message: types.Message, phone_number: str):
         if response.status_code == 200:
             data = response.json()
             formatted = format_api_response(data, phone_number)
+            save_lookup(uid, phone_number, data)
             kb = admin_kb() if str(uid) == str(ADMIN_ID) else main_menu_kb()
             app.send_message(message.chat.id, formatted, reply_markup=kb)
         else:
@@ -1333,6 +1381,84 @@ def handle_callback(client: Client, query: types.CallbackQuery):
             reply_markup=main_menu_kb(),
         )
         cb_answer("Contact admin")
+
+    elif data == "redeem":
+        safe_edit_text(query.message, 
+            "🎟️ <b>Redeem Code</b>\n\n"
+            "Send your redeem code using:\n"
+            "<code>/redeem &lt;CODE&gt;</code>\n\n"
+            "Codes are given by the admin.",
+            reply_markup=main_menu_kb(),
+        )
+        cb_answer("Redeem a code")
+
+    elif data == "admininfo":
+        kb = admin_kb() if str(uid) == str(ADMIN_ID) else main_menu_kb()
+        admin_id = int(ADMIN_ID) if ADMIN_ID else None
+        username = ADMIN_USERNAME or (f"@{ADMIN_CONTACT}" if not ADMIN_CONTACT.startswith("@") else ADMIN_CONTACT)
+        name = ADMIN_NAME
+        status = "🟡 Unknown"
+        if admin_id:
+            try:
+                admin_user = app.get_users(admin_id)
+                us = getattr(admin_user, "status", None)
+                if us == enums.UserStatus.ONLINE:
+                    status = "🟢 Online"
+                elif us == enums.UserStatus.RECENTLY:
+                    status = "🟢 Recently Online"
+                elif us == enums.UserStatus.LAST_WEEK:
+                    status = "🟡 Last Seen This Week"
+                elif us == enums.UserStatus.LAST_MONTH:
+                    status = "🟠 Last Seen This Month"
+                elif us == enums.UserStatus.OFFLINE:
+                    status = "🔴 Offline"
+                elif us == enums.UserStatus.LONG_AGO:
+                    status = "🔴 Last Seen Long Ago"
+            except Exception:
+                pass
+        contact_line = ADMIN_CONTACT if ADMIN_CONTACT.startswith("@") else f"@{ADMIN_CONTACT}"
+        safe_edit_text(query.message,
+            f"👑 <b>Admin Info</b>\n\n"
+            f"👤 <b>Name:</b> {name}\n"
+            f"📛 <b>Username:</b> @{username.lstrip('@')}\n"
+            f"🕐 <b>Status:</b> {status}\n"
+            f"📩 <b>Contact:</b> {contact_line}\n\n"
+            f"💬 Message the admin to buy credits, request access, or get help.",
+            reply_markup=kb,
+        )
+        cb_answer("Admin info")
+
+    elif data == "admin_gencode":
+        if str(uid) != str(ADMIN_ID):
+            cb_answer("⛔ Admin only", alert=True)
+            return
+        safe_edit_text(query.message,
+            "🎟️ <b>Generate Redeem Code</b>\n\n"
+            "Usage:\n"
+            "<code>/gencode &lt;custom_code&gt; [amount]</code>\n"
+            "<code>/gencode &lt;credits&gt; [count]</code>\n\n"
+            "Examples:\n"
+            "<code>/gencode MYCODE</code> — custom code, default credits\n"
+            "<code>/gencode MYCODE 10</code> — custom code worth 10 credits\n"
+            "<code>/gencode 10</code> — auto code worth 10 credits\n"
+            "<code>/gencode 5 10</code> — ten auto codes worth 5 credits each",
+            reply_markup=admin_kb(),
+        )
+        cb_answer("Use /gencode")
+
+    elif data == "admin_broadcast":
+        if str(uid) != str(ADMIN_ID):
+            cb_answer("⛔ Admin only", alert=True)
+            return
+        pending_input[uid] = "awaiting_broadcast_text"
+        safe_edit_text(query.message,
+            "📣 <b>Broadcast</b>\n\n"
+            "Send the message to broadcast to all users.\n"
+            "You can use formatting:\n"
+            "<code>[bold]</code> <code>_mono_</code> <code>[text](url)</code>\n\n"
+            "Reply <code>cancel</code> to abort.",
+        )
+        cb_answer("Send broadcast message")
 
     elif data == "admin_list_users":
         if str(uid) != str(ADMIN_ID):
