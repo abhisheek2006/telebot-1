@@ -5,10 +5,10 @@
 {% block content %}
 <div class="page-head">
     <div>
-        <h1>Lookup History <span style="color: var(--text-muted); font-size:18px;">({{ lookups|length }})</span></h1>
+        <h1>Lookup History <span class="page-count">({{ lookups|length }})</span></h1>
         <p class="page-sub">Every phone number searched in the bot, with its result</p>
     </div>
-    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+    <div class="flex-end">
         <div class="search-bar">
             <input class="input" type="search" id="lookup-search" placeholder="Search number or name..." value="{{ q }}">
         </div>
@@ -44,7 +44,7 @@
                 <td data-label="Searched By">
                     {% if l.user_id %}
                         {% set u = user_names.get(l.user_id) %}
-                        <a href="{{ url_for('user_detail', user_id=l.user_id) }}" style="color: var(--accent-text);">
+                        <a href="{{ url_for('user_detail', user_id=l.user_id) }}" class="accent-link">
                             <span class="mono">{{ l.user_id }}</span>
                         </a>
                         {% if u %} <span class="page-sub">· {{ u.get('first_name', '') }}</span>{% endif %}

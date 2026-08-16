@@ -107,4 +107,14 @@
       setTimeout(function () { a.remove(); }, 420);
     });
   }, 5000);
+
+  /* ── Submit loading state ──────────────────────────────── */
+  document.querySelectorAll("form").forEach(function (form) {
+    form.addEventListener("submit", function () {
+      var btn = form.querySelector('button[type="submit"]');
+      if (btn && !btn.classList.contains("is-loading")) {
+        btn.classList.add("is-loading");
+      }
+    });
+  });
 })();
