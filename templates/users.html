@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Users - Bot Admin</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">🤖 Bot Admin</div>
+        <div class="nav-links">
+            <a href="{{ url_for('dashboard') }}">Dashboard</a>
+            <a href="{{ url_for('users_list') }}" class="active">Users</a>
+            <a href="{{ url_for('logout') }}" class="btn-logout">Logout</a>
+        </div>
+    </nav>
+
+    <main class="container">
+        <h1>Users ({{ users|length }})</h1>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, msg in messages %}
+                <div class="alert alert-{{ category }}">{{ msg }}</div>
+            {% endfor %}
+        {% endwith %}
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Username</th>
+                        <th>Status</th>
+                        <th>Credits</th>
+                        <th>Lookups</th>
+                        <th>Referrals</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in users %}
+                    <tr>
+                        <td>{{ u.user_id }}</td>
+                        <td>{{ u.first_name }}</td>
+                        <td>@{{ u.username or '-' }}</td>
+                        <td>
+                            {% if u.is_approved %}
+                                <span class="badge badge-success">Approved</span>
+                            {% else %}
+                                <span class="badge badge-danger">Pending</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ u.credits }}</td>
+                        <td>{{ u.total_lookups }}</td>
+                        <td>{{ u.referrals_count }}</td>
+                        <td>{{ u.created_at.strftime('%Y-%m-%d') if u.created_at else '-' }}</td>
+                        <td>
+                            <a href="{{ url_for('user_detail', user_id=u.user_id) }}" class="btn btn-sm">View</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </main>
+</body>
+</html>

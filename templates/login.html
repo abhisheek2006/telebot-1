@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Bot Admin</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="login-body">
+    <div class="login-card">
+        <div class="login-logo">🤖</div>
+        <h1>Bot Admin Panel</h1>
+        <p class="login-sub">Enter your password to continue</p>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, msg in messages %}
+                <div class="alert alert-{{ category }}">{{ msg }}</div>
+            {% endfor %}
+        {% endwith %}
+        <form method="post" action="{{ url_for('login') }}">
+            <input type="password" name="password" placeholder="Password" required autofocus>
+            <button type="submit">Login</button>
+        </form>
+    </div>
+</body>
+</html>

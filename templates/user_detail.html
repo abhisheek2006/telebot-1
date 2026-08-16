@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Detail - Bot Admin</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">🤖 Bot Admin</div>
+        <div class="nav-links">
+            <a href="{{ url_for('dashboard') }}">Dashboard</a>
+            <a href="{{ url_for('users_list') }}">Users</a>
+            <a href="{{ url_for('logout') }}" class="btn-logout">Logout</a>
+        </div>
+    </nav>
+
+    <main class="container">
+        <h1>User Detail</h1>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, msg in messages %}
+                <div class="alert alert-{{ category }}">{{ msg }}</div>
+            {% endfor %}
+        {% endwith %}
+        <a href="{{ url_for('users_list') }}" class="btn btn-sm">← Back</a>
+
+        <div class="detail-card">
+            <div class="detail-row"><span>ID</span><code>{{ user.user_id }}</code></div>
+            <div class="detail-row"><span>Name</span><strong>{{ user.first_name }}</strong></div>
+            <div class="detail-row"><span>Username</span><strong>@{{ user.username or '-' }}</strong></div>
+            <div class="detail-row"><span>Status</span>
+                {% if user.is_approved %}
+                    <span class="badge badge-success">Approved</span>
+                {% else %}
+                    <span class="badge badge-danger">Pending</span>
+                {% endif %}
+            </div>
+            <div class="detail-row"><span>Credits</span><code>{{ user.credits }}</code></div>
+            <div class="detail-row"><span>Referral Code</span><code>{{ user.referral_code }}</code></div>
+            <div class="detail-row"><span>Referred By</span><code>{{ user.referred_by or 'None' }}</code></div>
+            <div class="detail-row"><span>Referrals</span><code>{{ user.referrals_count }}</code></div>
+            <div class="detail-row"><span>Total Lookups</span><code>{{ user.total_lookups }}</code></div>
+            <div class="detail-row"><span>Created</span><code>{{ user.created_at.strftime('%Y-%m-%d %H:%M UTC') if user.created_at else '-' }}</code></div>
+        </div>
+
+        <div class="actions">
+            <form method="post" action="{{ url_for('toggle_approve', user_id=user.user_id) }}" class="inline-form">
+                {% if user.is_approved %}
+                    <button type="submit" class="btn btn-danger">🚫 Revoke Access</button>
+                {% else %}
+                    <button type="submit" class="btn btn-success">✅ Approve User</button>
+                {% endif %}
+            </form>
+
+            <form method="post" action="{{ url_for('add_credits', user_id=user.user_id) }}" class="inline-form credit-form">
+                <input type="number" name="amount" placeholder="Credits" min="1" required>
+                <button type="submit" class="btn">💳 Add Credits</button>
+            </form>
+
+            <form method="post" action="{{ url_for('delete_user', user_id=user.user_id) }}"
+                  onsubmit="return confirm('Delete this user permanently?');" class="inline-form">
+                <button type="submit" class="btn btn-danger">🗑️ Delete User</button>
+            </form>
+        </div>
+    </main>
+</body>
+</html>
