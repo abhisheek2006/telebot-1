@@ -3,6 +3,7 @@ import logging
 import random
 import re
 import string
+import time
 import requests
 from datetime import datetime, timezone
 from pyrogram import Client, enums, filters, types
@@ -155,6 +156,58 @@ def get_user(user_id: int):
 
 def bump_stat(key: str, amount: int = 1):
     stats_col.update_one({'_id': 'bot'}, {'$inc': {key: amount}}, upsert=True)
+
+
+DEFAULT_MAINTENANCE_MESSAGE = (
+    "🔧 <b>The bot is currently under maintenance.</b>\n\n"
+    "Please try again later. Thank you for your patience!"
+)
+
+MAINTENANCE_CACHE = {"ts": 0.0, "mode": False, "message": DEFAULT_MAINTENANCE_MESSAGE}
+MAINTENANCE_TTL = 5.0
+
+
+def get_maintenance_status() -> tuple:
+    """Return (maintenance_mode, message). Cached to avoid DB hits per message."""
+    now = time.time()
+    if now - MAINTENANCE_CACHE["ts"] > MAINTENANCE_TTL:
+        try:
+            doc = stats_col.find_one({"_id": "bot"})
+            mode = bool(doc.get("maintenance_mode", False)) if doc else False
+            message = (
+                (doc.get("maintenance_message") or DEFAULT_MAINTENANCE_MESSAGE)
+                if doc else DEFAULT_MAINTENANCE_MESSAGE
+            )
+            MAINTENANCE_CACHE["mode"] = mode
+            MAINTENANCE_CACHE["message"] = message
+            MAINTENANCE_CACHE["ts"] = now
+        except Exception as e:
+            logging.warning("Could not read maintenance config: %s", e)
+    return MAINTENANCE_CACHE["mode"], MAINTENANCE_CACHE["message"]
+
+
+def maintenance_blocked(user_id: int) -> bool:
+    """True when the bot is under maintenance and the user is not the admin."""
+    mode, _ = get_maintenance_status()
+    if not mode:
+        return False
+    return str(user_id) != str(ADMIN_ID)
+
+
+def set_maintenance_mode(mode: bool, message: str = None):
+    """Turn maintenance mode on/off and update the cache immediately."""
+    update = {"maintenance_mode": mode}
+    if message:
+        update["maintenance_message"] = message
+    stats_col.update_one({"_id": "bot"}, {"$set": update}, upsert=True)
+    MAINTENANCE_CACHE["mode"] = mode
+    MAINTENANCE_CACHE["message"] = message or DEFAULT_MAINTENANCE_MESSAGE
+    MAINTENANCE_CACHE["ts"] = time.time()
+    return mode
+
+
+def strip_html(text: str) -> str:
+    return re.sub(r"<[^>]+>", "", text).replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
 
 
 def safe_edit_text(message: types.Message, text: str, **kwargs):
@@ -354,6 +407,12 @@ def admin_kb(user_id: int = None) -> types.InlineKeyboardMarkup:
                 style=enums.ButtonStyle.DANGER,
             ),
         ],
+        [
+            types.InlineKeyboardButton(
+                "🔧 Maintenance", callback_data="admin_maintenance",
+                style=enums.ButtonStyle.DEFAULT,
+            ),
+        ],
     ]
     return types.InlineKeyboardMarkup(rows)
 
@@ -462,6 +521,11 @@ def handle_message(client: Client, message: types.Message):
     username = message.from_user.username or None
     get_or_create_user(user_id, first_name, username)
 
+    if maintenance_blocked(user_id):
+        _, maint_msg = get_maintenance_status()
+        message.reply_text(maint_msg, reply_markup=main_menu_kb())
+        return
+
     if message.text and message.text.startswith("/"):
         cmd = message.text.split()[0].lstrip("/").lower()
         if cmd == "start":
@@ -494,6 +558,8 @@ def handle_message(client: Client, message: types.Message):
             _cmd_gencode(message)
         elif cmd == "admininfo":
             _cmd_admininfo(message)
+        elif cmd == "maintenance":
+            _cmd_maintenance(message)
         else:
             message.reply_text("❓ Unknown command. Use /help or /start.",
                                reply_markup=main_menu_kb())
@@ -509,6 +575,11 @@ def handle_group_message(client: Client, message: types.Message):
     first_name = message.from_user.first_name or "User"
     username = message.from_user.username or None
     get_or_create_user(user_id, first_name, username)
+
+    if maintenance_blocked(user_id):
+        _, maint_msg = get_maintenance_status()
+        message.reply_text(maint_msg)
+        return
 
     if message.text and message.text.startswith("/"):
         cmd = message.text.split()[0].lstrip("/").lower()
@@ -718,6 +789,44 @@ def _cmd_admin(message: types.Message):
         return
     text = "👑 <b>Admin Panel</b>\n\nUse buttons below:"
     message.reply_text(text, reply_markup=admin_kb())
+
+
+def _cmd_maintenance(message: types.Message):
+    if str(message.from_user.id) != str(ADMIN_ID):
+        message.reply_text("⛔ Admin only.")
+        return
+    mode, maint_msg = get_maintenance_status()
+    parts = message.text.split(maxsplit=1)
+    arg = parts[1].strip() if len(parts) > 1 else ""
+
+    if arg.lower() in ("on", "1", "true"):
+        set_maintenance_mode(True)
+        message.reply_text("🔧 <b>Maintenance mode ENABLED.</b>\nUsers will be blocked until you turn it off.", reply_markup=admin_kb())
+        return
+    if arg.lower() in ("off", "0", "false"):
+        set_maintenance_mode(False)
+        message.reply_text("✅ <b>Maintenance mode DISABLED.</b>\nThe bot is now fully accessible.", reply_markup=admin_kb())
+        return
+    if arg.lower().startswith("on "):
+        custom = arg[3:].strip()
+        if custom:
+            set_maintenance_mode(True, custom)
+            message.reply_text(
+                f"🔧 <b>Maintenance mode ENABLED</b> with custom message:\n\n{custom}",
+                reply_markup=admin_kb(),
+            )
+            return
+
+    status = "🔴 <b>MAINTENANCE MODE IS ON</b>" if mode else "🟢 Bot is running normally"
+    message.reply_text(
+        f"🔧 <b>Maintenance Mode</b>\n\n{status}\n\n"
+        f"Current message:\n<code>{maint_msg}</code>\n\n"
+        "Usage:\n"
+        "<code>/maintenance on</code> — enable\n"
+        "<code>/maintenance on Your message</code> — enable with custom message\n"
+        "<code>/maintenance off</code> — disable",
+        reply_markup=admin_kb(),
+    )
 
 
 def _cmd_balance(message: types.Message):
@@ -1307,6 +1416,11 @@ def handle_callback(client: Client, query: types.CallbackQuery):
     def cb_answer(text: str, alert: bool = False):
         app.answer_callback_query(query.id, text, show_alert=alert)
 
+    if maintenance_blocked(uid):
+        _, maint_msg = get_maintenance_status()
+        cb_answer(strip_html(maint_msg), alert=True)
+        return
+
     if data == "lookup":
         if not is_approved(uid):
             cb_answer("⛔ Not approved", alert=True)
@@ -1473,6 +1587,21 @@ def handle_callback(client: Client, query: types.CallbackQuery):
             "Reply <code>cancel</code> to abort.",
         )
         cb_answer("Send broadcast message")
+
+    elif data == "admin_maintenance":
+        if str(uid) != str(ADMIN_ID):
+            cb_answer("⛔ Admin only", alert=True)
+            return
+        mode, maint_msg = get_maintenance_status()
+        status = "🔴 <b>MAINTENANCE MODE IS ON</b>" if mode else "🟢 Bot is running normally"
+        safe_edit_text(query.message,
+            f"🔧 <b>Maintenance Mode</b>\n\n{status}\n\n"
+            f"Current message:\n<code>{maint_msg}</code>\n\n"
+            "Use <code>/maintenance on</code> or <code>/maintenance off</code> to toggle.\n"
+            "To set a custom message: <code>/maintenance on Your message here</code>",
+            reply_markup=admin_kb(),
+        )
+        cb_answer("Maintenance settings")
 
     elif data == "admin_list_users":
         if str(uid) != str(ADMIN_ID):
