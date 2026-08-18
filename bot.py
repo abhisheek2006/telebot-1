@@ -517,14 +517,15 @@ def user_action_kb(target_uid: int) -> types.InlineKeyboardMarkup:
 @app.on_message(filters.private)
 def handle_message(client: Client, message: types.Message):
     user_id = message.from_user.id
-    first_name = message.from_user.first_name or "User"
-    username = message.from_user.username or None
-    get_or_create_user(user_id, first_name, username)
 
     if maintenance_blocked(user_id):
         _, maint_msg = get_maintenance_status()
         message.reply_text(maint_msg, reply_markup=main_menu_kb())
         return
+
+    first_name = message.from_user.first_name or "User"
+    username = message.from_user.username or None
+    get_or_create_user(user_id, first_name, username)
 
     if message.text and message.text.startswith("/"):
         cmd = message.text.split()[0].lstrip("/").lower()
@@ -572,14 +573,15 @@ def handle_message(client: Client, message: types.Message):
 @app.on_message(filters.group)
 def handle_group_message(client: Client, message: types.Message):
     user_id = message.from_user.id
-    first_name = message.from_user.first_name or "User"
-    username = message.from_user.username or None
-    get_or_create_user(user_id, first_name, username)
 
     if maintenance_blocked(user_id):
         _, maint_msg = get_maintenance_status()
         message.reply_text(maint_msg)
         return
+
+    first_name = message.from_user.first_name or "User"
+    username = message.from_user.username or None
+    get_or_create_user(user_id, first_name, username)
 
     if message.text and message.text.startswith("/"):
         cmd = message.text.split()[0].lstrip("/").lower()
@@ -1409,17 +1411,17 @@ def format_api_response(data, phone_number):
 def handle_callback(client: Client, query: types.CallbackQuery):
     data = query.data
     uid = query.from_user.id
-    first_name = query.from_user.first_name or "User"
 
+    if maintenance_blocked(uid):
+        _, maint_msg = get_maintenance_status()
+        app.answer_callback_query(query.id, strip_html(maint_msg), show_alert=True)
+        return
+
+    first_name = query.from_user.first_name or "User"
     get_or_create_user(uid, first_name, query.from_user.username)
 
     def cb_answer(text: str, alert: bool = False):
         app.answer_callback_query(query.id, text, show_alert=alert)
-
-    if maintenance_blocked(uid) and data != "admininfo":
-        _, maint_msg = get_maintenance_status()
-        cb_answer(strip_html(maint_msg), alert=True)
-        return
 
     if data == "lookup":
         if not is_approved(uid):
