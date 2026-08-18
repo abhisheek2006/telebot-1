@@ -1593,15 +1593,23 @@ def handle_callback(client: Client, query: types.CallbackQuery):
             cb_answer("⛔ Admin only", alert=True)
             return
         mode, maint_msg = get_maintenance_status()
-        status = "🔴 <b>MAINTENANCE MODE IS ON</b>" if mode else "🟢 Bot is running normally"
-        safe_edit_text(query.message,
-            f"🔧 <b>Maintenance Mode</b>\n\n{status}\n\n"
-            f"Current message:\n<code>{maint_msg}</code>\n\n"
-            "Use <code>/maintenance on</code> or <code>/maintenance off</code> to toggle.\n"
-            "To set a custom message: <code>/maintenance on Your message here</code>",
-            reply_markup=admin_kb(),
-        )
-        cb_answer("Maintenance settings")
+        if mode:
+            set_maintenance_mode(False)
+            cb_answer("✅ Maintenance mode DISABLED", alert=True)
+            status = "🟢 Bot is running normally"
+            body = "🔧 <b>Maintenance Mode</b>\n\n🟢 Bot is running normally.\n\nPress the button below to enable maintenance from the bot or the web dashboard."
+            kb = admin_kb()
+        else:
+            set_maintenance_mode(True)
+            cb_answer("🔧 Maintenance mode ENABLED", alert=True)
+            status = "🔴 <b>MAINTENANCE MODE IS ON</b>"
+            body = (
+                f"🔧 <b>Maintenance Mode</b>\n\n{status}\n\n"
+                f"Users are now blocked. Current notice:\n<code>{maint_msg}</code>\n\n"
+                "Press the button below to disable maintenance. You can also toggle it from the web dashboard."
+            )
+            kb = admin_kb()
+        safe_edit_text(query.message, body, reply_markup=kb)
 
     elif data == "admin_list_users":
         if str(uid) != str(ADMIN_ID):
