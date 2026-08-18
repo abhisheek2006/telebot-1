@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Bot Control - Bot Admin{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        <h1>Bot Control <span class="page-count">— commands</span></h1>
+        <p class="page-sub">Send commands to the bot and manage maintenance mode</p>
+    </div>
+    {% if maintenance.maintenance_mode %}
+        <div class="flex-end"><span class="badge badge-danger">🔧 MAINTENANCE MODE ON</span></div>
+    {% else %}
+        <div class="flex-end"><span class="badge badge-success">🟢 BOT ONLINE</span></div>
+    {% endif %}
+</div>
+
+<div class="cols-2" style="max-width:1100px;">
+
+    <div class="card form-card">
+        <h2>🔧 Maintenance Mode</h2>
+        <p class="form-sub">
+            {% if maintenance.maintenance_mode %}
+                The bot is currently <b>in maintenance</b>. Non-admin users will get a notice (popup on buttons) that the bot is unavailable.
+            {% else %}
+                Turn on maintenance to pause the bot for everyone except the admin.
+            {% endif %}
+        </p>
+        <form method="post" action="{{ url_for('control_maintenance') }}">
+            <div class="field">
+                <label for="message">Maintenance notice shown to users</label>
+                <textarea class="input" id="message" name="message" rows="3" placeholder="🔧 The bot is currently under maintenance...">{{ maintenance.maintenance_message }}</textarea>
+            </div>
+            {% if maintenance.maintenance_mode %}
+                <button type="submit" name="action" value="disable" class="btn btn-success">✅ Bring Bot Back Online</button>
+            {% else %}
+                <button type="submit" name="action" value="enable" class="btn btn-danger">🔧 Enable Maintenance Mode</button>
+            {% endif %}
+        </form>
+    </div>
+
+    <div class="card form-card">
+        <h2>📣 Broadcast Command</h2>
+        <p class="form-sub">Send a message to all users from this panel. Supports HTML formatting and <code>[text](url)</code> links.</p>
+        <form method="post" action="{{ url_for('control_broadcast') }}">
+            <div class="field">
+                <label for="broadcast_text">Message</label>
+                <textarea class="input" id="broadcast_text" name="text" rows="5" placeholder="Write your broadcast message here..." required></textarea>
+            </div>
+            <button type="submit" class="btn btn-danger">📣 Broadcast to All</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

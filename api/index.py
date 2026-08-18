@@ -2,6 +2,7 @@ import os
 import functools
 import random
 import string
+import requests
 from datetime import datetime, timezone
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -24,6 +25,7 @@ MONGO_URI = os.environ.get(
     "?retryWrites=true&w=majority",
 )
 ADMIN_ID = os.environ.get("ADMIN_ID")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 WEB_PASSWORD = os.environ.get("WEB_PASSWORD", "admin123")
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@botpanel.com")
 
@@ -89,6 +91,94 @@ def login_required(view):
             return redirect(url_for("login"))
         return view(*args, **kwargs)
     return wrapped
+
+
+DEFAULT_MAINTENANCE_MESSAGE = (
+    "🔧 <b>The bot is currently under maintenance.</b>\n\n"
+    "Please try again later. Thank you for your patience!"
+)
+
+
+def get_maintenance_config():
+    doc = stats_col.find_one({"_id": "bot"}) or {}
+    return {
+        "maintenance_mode": bool(doc.get("maintenance_mode", False)),
+        "maintenance_message": doc.get("maintenance_message")
+        or DEFAULT_MAINTENANCE_MESSAGE,
+    }
+
+
+def set_maintenance_mode(enabled: bool, message: str = None):
+    update = {"maintenance_mode": enabled}
+    if message:
+        update["maintenance_message"] = message
+    stats_col.update_one({"_id": "bot"}, {"$set": update}, upsert=True)
+
+
+@app.route("/control")
+@login_required
+def control():
+    config = get_maintenance_config()
+    return render_template("control.html", maintenance=config)
+
+
+@app.route("/control/maintenance", methods=["POST"])
+@login_required
+def control_maintenance():
+    action = request.form.get("action", "")
+    message = request.form.get("message", "").strip()
+    if action == "enable":
+        set_maintenance_mode(True, message or DEFAULT_MAINTENANCE_MESSAGE)
+        flash("🔧 Bot is now in maintenance mode. Users will see the notice below.", "success")
+    elif action == "disable":
+        set_maintenance_mode(False)
+        flash("✅ Bot is back online. Maintenance mode disabled.", "success")
+    else:
+        flash("Invalid action.", "danger")
+    return redirect(url_for("control"))
+
+
+@app.route("/control/broadcast", methods=["POST"])
+@login_required
+def control_broadcast():
+    text = request.form.get("text", "").strip()
+    if not text:
+        flash("Broadcast message cannot be empty.", "danger")
+        return redirect(url_for("control"))
+    if not BOT_TOKEN:
+        flash("BOT_TOKEN is not set in the environment. Cannot broadcast.", "danger")
+        return redirect(url_for("control"))
+
+    users = list(users_col.find({}))
+    sent = failed = 0
+    for u in users:
+        uid = u.get("user_id")
+        if not uid:
+            continue
+        try:
+            resp = requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": uid,
+                    "text": text,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                },
+                timeout=10,
+            )
+            if resp.ok:
+                sent += 1
+            else:
+                failed += 1
+        except requests.RequestException:
+            failed += 1
+    stats_col.update_one({"_id": "bot"}, {"$inc": {"broadcasts": 1}}, upsert=True)
+    flash(
+        f"📣 Broadcast sent to {sent} user(s)"
+        + (f", {failed} failed." if failed else "."),
+        "success",
+    )
+    return redirect(url_for("control"))
 
 
 @app.route("/")
