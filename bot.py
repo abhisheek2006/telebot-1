@@ -1416,7 +1416,7 @@ def handle_callback(client: Client, query: types.CallbackQuery):
     def cb_answer(text: str, alert: bool = False):
         app.answer_callback_query(query.id, text, show_alert=alert)
 
-    if maintenance_blocked(uid):
+    if maintenance_blocked(uid) and data != "admininfo":
         _, maint_msg = get_maintenance_status()
         cb_answer(strip_html(maint_msg), alert=True)
         return
