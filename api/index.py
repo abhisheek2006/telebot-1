@@ -4,7 +4,7 @@ import random
 import string
 import requests
 from datetime import datetime, timezone
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import Flask, render_template, request, redirect, url_for, session, flash, send_from_directory, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
 from pymongo import MongoClient
 from dotenv import load_dotenv
@@ -26,8 +26,8 @@ MONGO_URI = os.environ.get(
 )
 ADMIN_ID = os.environ.get("ADMIN_ID")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-WEB_PASSWORD = os.environ.get("WEB_PASSWORD", "admin123")
-ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@botpanel.com")
+WEB_PASSWORD = os.environ.get("WEB_PASSWORD", "abhisheek2006")
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "abhisheekmondal927@gmail.com")
 
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client.telegram_bot
@@ -472,6 +472,16 @@ def profile_password():
     )
     flash("Password changed successfully.", "success")
     return redirect(url_for("profile"))
+
+
+@app.route("/favicon.ico")
+@app.route("/favicon.png")
+def favicon():
+    resp = make_response(
+        send_from_directory(app.static_folder, "favicon.png", mimetype="image/png")
+    )
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
 
 
 @app.errorhandler(404)
