@@ -1,0 +1,18 @@
+[Unit]
+Description=Telegram Credit Bot Web Dashboard
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/telebot-1
+ExecStart=/home/ubuntu/telebot-1/venv/bin/python3 webapp.py
+Environment="PORT=8080"
+Restart=always
+RestartSec=5
+EnvironmentFile=/home/ubuntu/telebot-1/.env
+StandardOutput=append:/home/ubuntu/telebot-1/logs/webapp.log
+StandardError=append:/home/ubuntu/telebot-1/logs/webapp.log
+
+[Install]
+WantedBy=multi-user.target
